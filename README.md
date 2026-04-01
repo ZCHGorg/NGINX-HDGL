@@ -22,6 +22,7 @@ ufw delete $(ufw status numbered | grep 8090 | grep -v 'DENY' | awk -F'[][]' '{p
 ufw status numbered | grep 8090   # should show only the DENY rules remaining
 
 # If using iptables — flush all 8090 rules cleanly:
+
 ```bash
 while iptables -D INPUT -p tcp --dport 8090 -j ACCEPT 2>/dev/null; do :; done
 while iptables -D INPUT -p tcp --dport 8090 -s <PEER_IP> -j ACCEPT 2>/dev/null; do :; done
@@ -36,7 +37,7 @@ echo "CLEAN"
 
 #  STEP 2 — Upload files to both nodes
 From your local machine:
-Bash# Replace with your actual node IPs or hostnames
+# Replace with your actual node IPs or hostnames
 
 # Upload to Node A
 ```bash
