@@ -22,10 +22,13 @@ ufw delete $(ufw status numbered | grep 8090 | grep -v 'DENY' | awk -F'[][]' '{p
 ufw status numbered | grep 8090   # should show only the DENY rules remaining
 
 # If using iptables — flush all 8090 rules cleanly:
+```bash
 while iptables -D INPUT -p tcp --dport 8090 -j ACCEPT 2>/dev/null; do :; done
 while iptables -D INPUT -p tcp --dport 8090 -s <PEER_IP> -j ACCEPT 2>/dev/null; do :; done
+```
 
 # Verify nginx still works
+
 ```bash
 nginx -t && systemctl reload nginx
 echo "CLEAN"
@@ -60,6 +63,8 @@ cd /root/hdgl_deploy
 sudo HDGL_LOCAL_NODE=NODE_A_IP \
      HDGL_PEER_NODES=NODE_B_IP \
      bash deploy_hdgl.sh
+```
+
 Expect: ✓ Audit: 57/57 tests passing and HDGL stack deployed successfully.
 Then go live:
 Bash# Generate cluster secret — use this same value on Node B
@@ -117,7 +122,7 @@ Expect: Mode: LIVE, NGINX reloaded, cluster joined — 2 peer(s) healthy.
 # STEP 5 — Verify it's analog, not fake
 Run on Node A once both nodes show clean cycles:
 ```bash
-Bashcd /opt/hdgl && /opt/hdgl/venv/bin/python3 << 'VERIFY'
+cd /opt/hdgl && /opt/hdgl/venv/bin/python3 << 'VERIFY'
 import sys, json, re, urllib.request
 sys.path.insert(0, '/opt/hdgl')
 from hdgl_fileswap import _phi_tau, _omega_ttl, STRAND_GEOMETRY
