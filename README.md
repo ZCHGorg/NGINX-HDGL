@@ -68,6 +68,7 @@ sudo HDGL_LOCAL_NODE=NODE_A_IP \
 Expect: ✓ Audit: 57/57 tests passing and HDGL stack deployed successfully.
 Then go live:
 Bash# Generate cluster secret — use this same value on Node B
+```
 SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 echo "SECRET: $SECRET"   # SAVE THIS
 
