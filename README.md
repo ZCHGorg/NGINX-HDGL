@@ -89,7 +89,7 @@ Expect: Mode: LIVE, NGINX reloaded, cluster joined, no ERROR lines.
 ```
 
 # STEP 4 — Deploy Node B (Small node)
-Bash# On Node B:
+# On Node B:
 ```bash
 cd /root/hdgl_deploy
 sudo HDGL_LOCAL_NODE=NODE_B_IP \
@@ -192,7 +192,7 @@ VERIFY
 Open two terminals.
 Terminal 1 — watch Node B authority continuously:
 ```bash
-Bashwatch -n 3 'curl -s http://NODE_B_IP:8090/node_info | \
+watch -n 3 'curl -s http://NODE_B_IP:8090/node_info | \
   python3 -c "import json,sys; d=json.load(sys.stdin); \
   print(d[\"fingerprint\"], \"strands:\", d[\"authority_strands\"])"'
 ```
