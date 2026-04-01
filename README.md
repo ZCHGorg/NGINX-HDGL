@@ -108,14 +108,16 @@ echo "LN_CERTBOT_ENABLED=0"                                          >> /opt/hdg
 ```
 
 # Add firewall rule for Node A (iptables example):
+```
 iptables -I INPUT -p tcp --dport 8090 -s NODE_A_IP -j ACCEPT
 iptables-save > /etc/iptables/rules.v4
+```
 
 # Verify — should show exactly ONE rule for Node A:
-```bash
+```
 iptables -L INPUT -n | grep 8090
 ```
-```bash
+```
 systemctl restart hdgl-daemon
 sleep 8
 tail -15 /var/log/hdgl/daemon.log
