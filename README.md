@@ -200,15 +200,16 @@ watch -n 3 'curl -s http://NODE_B_IP:8090/node_info | \
 ```
 
 Terminal 2 — kill Node A:
-Bash# On Node A:
-```bash
+# On Node A:
+```
 systemctl stop hdgl-daemon
+```
 Within 60 seconds Node B should take over full authority (strands: [0,1,2,3,4,5,6,7]).
 No config was changed. The geometry decided.
-```
+
 Bring Node A back:
 
-```bash
+```
 systemctl start hdgl-daemon
 ```
 
