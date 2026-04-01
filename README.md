@@ -20,10 +20,11 @@ rm -f /etc/nginx/conf.d/hdgl_upstreams.conf
 # If using UFW:
 ufw delete $(ufw status numbered | grep 8090 | grep -v 'DENY' | awk -F'[][]' '{print $2}' | sort -rn | head -1) 2>/dev/null || true
 ufw status numbered | grep 8090   # should show only the DENY rules remaining
+```
 
 # If using iptables — flush all 8090 rules cleanly:
 
-```bash
+```
 while iptables -D INPUT -p tcp --dport 8090 -j ACCEPT 2>/dev/null; do :; done
 while iptables -D INPUT -p tcp --dport 8090 -s <PEER_IP> -j ACCEPT 2>/dev/null; do :; done
 ```
