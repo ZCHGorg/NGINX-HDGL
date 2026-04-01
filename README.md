@@ -217,7 +217,3 @@ NGINX weights on Node B: [1]  (upstream-only config, no server blocks)
 
 # living_network.conf: rewritten every 30s by daemon, not by deploy script
 The 8 different weight values on the large node are the proof — each strand has a different weight because each polytope has a different alpha value, which produces a different TTL, which produces a different phi-proportional weight. None of those numbers appear anywhere in a config file.
-text### Optional further improvements (you can do these manually):
-
-1. Replace `NODE_A_IP` / `NODE_B_IP` with placeholders like `<NODE_A_IP>` or actual hostnames if you use DNS.
-2. Consider adding a section at the top explaining what variables to replace.
