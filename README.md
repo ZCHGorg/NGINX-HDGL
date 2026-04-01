@@ -28,8 +28,9 @@ while iptables -D INPUT -p tcp --dport 8090 -s <PEER_IP> -j ACCEPT 2>/dev/null; 
 # Verify nginx still works
 nginx -t && systemctl reload nginx
 echo "CLEAN"
+```
 
-STEP 2 — Upload files to both nodes
+#  STEP 2 — Upload files to both nodes
 From your local machine:
 Bash# Replace with your actual node IPs or hostnames
 
@@ -47,7 +48,7 @@ scp hdgl_lattice.py hdgl_fileswap.py hdgl_node_server.py hdgl_ingress.py \
     hdgl_moire_c.so deploy_hdgl.sh \
     root@NODE_B_IP:/root/hdgl_deploy/
 
-STEP 3 — Deploy Node A (Large node)
+# STEP 3 — Deploy Node A (Large node)
 Bash# On Node A:
 cd /root/hdgl_deploy
 sudo HDGL_LOCAL_NODE=NODE_A_IP \
@@ -65,40 +66,50 @@ sed -i 's/LN_DRY_RUN=1/LN_DRY_RUN=0/'                     /opt/hdgl/.env
 echo "LN_CERTBOT_ENABLED=0"                               >> /opt/hdgl/.env
 
 # Verify .env
+```
 grep -E 'SIMULATION|DRY_RUN|SECRET|CERTBOT' /opt/hdgl/.env
 
 systemctl restart hdgl-daemon
 sleep 8
 tail -15 /var/log/hdgl/daemon.log
 Expect: Mode: LIVE, NGINX reloaded, cluster joined, no ERROR lines.
+```
 
-STEP 4 — Deploy Node B (Small node)
+# STEP 4 — Deploy Node B (Small node)
 Bash# On Node B:
+```
 cd /root/hdgl_deploy
 sudo HDGL_LOCAL_NODE=NODE_B_IP \
      HDGL_PEER_NODES=NODE_A_IP \
      bash deploy_hdgl.sh
+```
 
 # Set SAME secret as Node A:
+```
 sed -i "s/LN_CLUSTER_SECRET=.*/LN_CLUSTER_SECRET=PASTE_SECRET_HERE/" /opt/hdgl/.env
 sed -i 's/LN_SIMULATION=1/LN_SIMULATION=0/'                           /opt/hdgl/.env
 sed -i 's/LN_DRY_RUN=1/LN_DRY_RUN=0/'                                /opt/hdgl/.env
 echo "LN_CERTBOT_ENABLED=0"                                          >> /opt/hdgl/.env
+```
 
 # Add firewall rule for Node A (iptables example):
 iptables -I INPUT -p tcp --dport 8090 -s NODE_A_IP -j ACCEPT
 iptables-save > /etc/iptables/rules.v4
 
 # Verify — should show exactly ONE rule for Node A:
+```
 iptables -L INPUT -n | grep 8090
-
+```
+```
 systemctl restart hdgl-daemon
 sleep 8
 tail -15 /var/log/hdgl/daemon.log
 Expect: Mode: LIVE, NGINX reloaded, cluster joined — 2 peer(s) healthy.
+```
 
-STEP 5 — Verify it's analog, not fake
+# STEP 5 — Verify it's analog, not fake
 Run on Node A once both nodes show clean cycles:
+```
 Bashcd /opt/hdgl && /opt/hdgl/venv/bin/python3 << 'VERIFY'
 import sys, json, re, urllib.request
 sys.path.insert(0, '/opt/hdgl')
@@ -162,30 +173,42 @@ except Exception as e:
 
 print("=" * 65)
 VERIFY
+```
 
-STEP 6 — Adversarial test (the only real proof)
+# STEP 6 — Adversarial test (the only real proof)
 Open two terminals.
 Terminal 1 — watch Node B authority continuously:
+```
 Bashwatch -n 3 'curl -s http://NODE_B_IP:8090/node_info | \
   python3 -c "import json,sys; d=json.load(sys.stdin); \
   print(d[\"fingerprint\"], \"strands:\", d[\"authority_strands\"])"'
+```
+
 Terminal 2 — kill Node A:
 Bash# On Node A:
+```
 systemctl stop hdgl-daemon
 Within 60 seconds Node B should take over full authority (strands: [0,1,2,3,4,5,6,7]).
 No config was changed. The geometry decided.
+```
 Bring Node A back:
-Bashsystemctl start hdgl-daemon
+
+```
+systemctl start hdgl-daemon
+```
+
 Within another 60 seconds Node B should release authority back to Node A.
 
 Clean success looks like
+```
 textNode A: fp=0xFFFFFFFF  excit=1.00  stor=836GB  strands=[0,1,2,3,4,5,6,7]
 Node B: fp=0xFFB00000  excit=0.34  stor=7GB    strands=[]
 
 NGINX weights on Node A: [7, 11, 14, 18, 22, 26, 30, 34]  (8 different values)
 NGINX weights on Node B: [1]  (upstream-only config, no server blocks)
+```
 
-living_network.conf: rewritten every 30s by daemon, not by deploy script
+# living_network.conf: rewritten every 30s by daemon, not by deploy script
 The 8 different weight values on the large node are the proof — each strand has a different weight because each polytope has a different alpha value, which produces a different TTL, which produces a different phi-proportional weight. None of those numbers appear anywhere in a config file.
 text### Optional further improvements (you can do these manually):
 
