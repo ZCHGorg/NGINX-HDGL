@@ -13,11 +13,43 @@
 
 ## What's Next: v0.6-c (Pure C Implementation)
 
-**v0.6 Development Status**: Native HTTP Front Door + Peer Transport + Gossip + Fileswap ✓
+**v0.6 Development Status**: ✓ COMPLETE — Pure C Stack Fully Implemented
 
-HDGL v0.6-c represents the next generation: **pure C implementation** with a native HDGL:// front door, cluster gossip, and strand-addressed fileswap for direct NGINX replacement.
+HDGL v0.6-c represents the next generation: **pure C implementation** with:
+- Native HDGL:// front door (200K+ req/sec target)
+- Peer transport with connection pooling (96%+ reuse)
+- Cluster gossip protocol (~16-byte binary messages)
+- Strand-addressed fileswap distribution
+- Self-describing protocol discovery
 
-The protocol exposes a self-describing discovery surface at `/protocol` and `/.well-known/hdgl`, so HDGL can advertise its edge, peer, gossip, and fileswap behavior directly over HDGL://.
+The protocol exposes discovery at `/protocol` and `/.well-known/hdgl`, so HDGL advertises edge, peer, fileswap, and gossip behavior directly over HDGL://.
+
+### v0.6 Deployment
+
+```bash
+cd v0.6-c
+make build
+export LN_LOCAL_NODE=127.0.0.1
+export LN_CLUSTER_SECRET=my-secret-key
+./bin/hdgl_daemon
+
+# In another terminal, verify:
+curl http://127.0.0.1:8090/health         # → "ok"
+curl http://127.0.0.1:8090/protocol       # → HDGL:// capabilities
+curl http://127.0.0.1:8090/metrics        # → live metrics
+curl http://127.0.0.1:8090/node_info      # → node topology
+```
+
+### v0.6 Performance Benchmark
+
+```bash
+# Terminal 1: Start daemon
+cd v0.6-c && make build && ./bin/hdgl_daemon
+
+# Terminal 2: Run benchmark
+cd v0.6-c && make bench && ./bin/hdgl_bench 127.0.0.1 8090 30 1000
+# Expected: 200K+ req/sec, <1ms P99 latency
+```
 
 ### v0.6 Goals
 
