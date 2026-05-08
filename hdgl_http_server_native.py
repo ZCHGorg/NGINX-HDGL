@@ -30,19 +30,21 @@ Features:
 
 import asyncio
 import hashlib
-import json
 import logging
 import math
 import os
 import ssl
+import threading
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import aiohttp
 from aiohttp import web
+
+from hdgl_fileswap import _phi_tau as fileswap_phi_tau
+from hdgl_fileswap import _strand_for_path as fileswap_strand_for_path
 
 log = logging.getLogger(__name__)
 
@@ -58,8 +60,8 @@ LOCAL_NODE = os.getenv("LN_LOCAL_NODE", "127.0.0.1")
 HTTP_PORT = int(os.getenv("LN_HTTP_PORT", "8080"))
 HTTPS_PORT = int(os.getenv("LN_HTTPS_PORT", "8443"))
 CLUSTER_SECRET = os.getenv("LN_CLUSTER_SECRET", "")
-SSL_CERT_PATH = Path(os.getenv("LN_SSL_CERT", "/etc/ssl/certs/hdgl-selfsigned.crt"))
-SSL_KEY_PATH = Path(os.getenv("LN_SSL_KEY", "/etc/ssl/private/hdgl-selfsigned.key"))
+SSL_CERT_PATH = Path(os.getenv("LN_SSL_CERT", "/opt/hdgl/tls/hdgl.crt"))
+SSL_KEY_PATH = Path(os.getenv("LN_SSL_KEY", "/opt/hdgl/tls/hdgl.key"))
 
 # Connection pooling
 MAX_POOL_SIZE_PER_STRAND = int(os.getenv("LN_HTTP_POOL_SIZE", "16"))
@@ -71,17 +73,30 @@ CONNECTION_TIMEOUT = float(os.getenv("LN_HTTP_CONN_TIMEOUT", "30.0"))
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _phi_tau(s: str) -> float:
-    """Encode string → phi-tau (0 to 8 range, spiral position)."""
-    h = int(hashlib.sha256(s.encode()).hexdigest()[:16], 16)
-    # Map to 0-8 range (8 strands + 1 overflow region)
-    tau = ((h % 360) / 45.0)  # 360 degrees / 8 strands = 45° per strand
-    return tau
+    """Delegate to the canonical fileswap phi-tau implementation."""
+    return fileswap_phi_tau(s)
 
 
 def _strand_for_path(path: str) -> int:
-    """Map path → strand index (0-7)."""
-    tau = _phi_tau(path)
-    return min(int(tau), NUM_STRANDS - 1)
+    """Delegate to the canonical fileswap strand routing implementation."""
+    return fileswap_strand_for_path(path)
+
+
+def _authority_node(authority_entry: Any) -> str:
+    """Normalize lattice authority entries to the authoritative node ID."""
+    if isinstance(authority_entry, tuple):
+        return str(authority_entry[0])
+    return str(authority_entry)
+
+
+def _authority_weight(authority_entry: Any) -> Optional[float]:
+    """Return authority weight when the lattice provides one."""
+    if isinstance(authority_entry, tuple) and len(authority_entry) > 1:
+        try:
+            return float(authority_entry[1])
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -167,6 +182,12 @@ class HDGLHTTPServer:
         self.local_node = local_node
         self.http_port = http_port
         self.https_port = https_port
+        self._runner: Optional[web.AppRunner] = None
+        self._site: Optional[web.TCPSite] = None
+        self._https_site: Optional[web.TCPSite] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._thread: Optional[threading.Thread] = None
+        self._started = threading.Event()
 
         # Connection pools per strand
         self.pools: Dict[int, StrandConnectionPool] = {
@@ -193,16 +214,17 @@ class HDGLHTTPServer:
 
     def _setup_routes(self) -> None:
         """Register HTTP routes."""
-        self.app.router.add_get("/{path:.*}", self.handle_request)
-        self.app.router.add_post("/{path:.*}", self.handle_request)
-        self.app.router.add_put("/{path:.*}", self.handle_request)
-        self.app.router.add_delete("/{path:.*}", self.handle_request)
-
         # Management endpoints
         self.app.router.add_get("/hdgl/metrics", self.handle_metrics)
         self.app.router.add_get("/hdgl/strand-map", self.handle_strand_map)
         self.app.router.add_get("/hdgl/pool-status", self.handle_pool_status)
         self.app.router.add_get("/hdgl/health", self.handle_health)
+
+        # Catch-all application routes must come after management endpoints.
+        self.app.router.add_get("/{path:.*}", self.handle_request)
+        self.app.router.add_post("/{path:.*}", self.handle_request)
+        self.app.router.add_put("/{path:.*}", self.handle_request)
+        self.app.router.add_delete("/{path:.*}", self.handle_request)
 
     async def handle_request(self, request: web.Request) -> web.Response:
         """Main request handler with strand-based routing."""
@@ -212,12 +234,17 @@ class HDGLHTTPServer:
         try:
             # Strand routing decision
             strand_idx = _strand_for_path(path)
-            authority = self.lattice.top_node_per_strand()[strand_idx]
+            authority_entry = self.lattice.top_node_per_strand()[strand_idx]
+            authority = _authority_node(authority_entry)
+            authority_weight = _authority_weight(authority_entry)
 
             self.strand_metrics[strand_idx]["requests"] += 1
             self.strand_metrics[strand_idx]["authority"] = authority
 
-            log.info(f"[route] path={path} strand={strand_idx} authority={authority}")
+            log.info(
+                f"[route] path={path} strand={strand_idx} authority={authority}"
+                + (f" weight={authority_weight:.5f}" if authority_weight is not None else "")
+            )
 
             # Local authority: serve from fileswap
             if authority == self.local_node:
@@ -260,7 +287,7 @@ class HDGLHTTPServer:
                 session = aiohttp.ClientSession(timeout=timeout)
 
             # Build target URL
-            target_url = f"http://{authority}:8080{path}"
+            target_url = f"http://{authority}:{self.http_port}{path}"
             if request.query_string:
                 target_url += f"?{request.query_string}"
 
@@ -303,8 +330,11 @@ class HDGLHTTPServer:
         """Return current authority per strand."""
         strand_map = {}
         for k in range(NUM_STRANDS):
-            authority = self.lattice.top_node_per_strand()[k]
-            strand_map[f"strand_{k}"] = authority
+            authority_entry = self.lattice.top_node_per_strand()[k]
+            strand_map[f"strand_{k}"] = {
+                "node": _authority_node(authority_entry),
+                "weight": _authority_weight(authority_entry),
+            }
         return web.json_response(strand_map)
 
     async def handle_pool_status(self, request: web.Request) -> web.Response:
@@ -320,10 +350,107 @@ class HDGLHTTPServer:
             "uptime_seconds": time.time() - self.pools[0].created_at,
         })
 
+    async def _start_async(self) -> None:
+        """Create runner and bind the HTTP listener."""
+        if self._runner is not None:
+            return
+        self._runner = web.AppRunner(self.app, access_log=None)
+        await self._runner.setup()
+        self._site = web.TCPSite(self._runner, host="0.0.0.0", port=self.http_port)
+        await self._site.start()
+
+        ssl_context = self._build_ssl_context()
+        if ssl_context is not None:
+            self._https_site = web.TCPSite(
+                self._runner,
+                host="0.0.0.0",
+                port=self.https_port,
+                ssl_context=ssl_context,
+            )
+            await self._https_site.start()
+            log.info(f"[native-http] TLS listening on 0.0.0.0:{self.https_port}")
+
+        self._started.set()
+        log.info(f"[native-http] listening on 0.0.0.0:{self.http_port}")
+
+    async def _stop_async(self) -> None:
+        """Stop the HTTP listener and close pooled upstream sessions."""
+        if self._https_site is not None:
+            await self._https_site.stop()
+            self._https_site = None
+
+        if self._site is not None:
+            await self._site.stop()
+            self._site = None
+
+        if self._runner is not None:
+            await self._runner.cleanup()
+            self._runner = None
+
+        for pool in self.pools.values():
+            while not pool.connections.empty():
+                try:
+                    conn = pool.connections.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                await conn.close()
+
+    def _build_ssl_context(self) -> Optional[ssl.SSLContext]:
+        """Create an SSL context when certificate files are available."""
+        if not SSL_CERT_PATH.exists() or not SSL_KEY_PATH.exists():
+            log.warning(
+                f"[native-http] TLS disabled: missing cert/key at {SSL_CERT_PATH} / {SSL_KEY_PATH}"
+            )
+            return None
+
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        context.load_cert_chain(str(SSL_CERT_PATH), str(SSL_KEY_PATH))
+        return context
+
     def run(self) -> None:
-        """Start the HTTP server."""
-        log.info(f"Starting HDGL HTTP server on {self.local_node}:{self.http_port}")
-        web.run_app(self.app, host="0.0.0.0", port=self.http_port)
+        """Run the HTTP server in the current thread."""
+        async def _main() -> None:
+            await self._start_async()
+            while True:
+                await asyncio.sleep(3600)
+
+        try:
+            asyncio.run(_main())
+        except KeyboardInterrupt:
+            log.info("[native-http] interrupted")
+
+    def start_background(self) -> None:
+        """Start the HTTP server in a dedicated daemon thread."""
+        if self._thread and self._thread.is_alive():
+            return
+
+        self._started.clear()
+
+        def _thread_main() -> None:
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+            self._loop.run_until_complete(self._start_async())
+            self._loop.run_forever()
+            self._loop.run_until_complete(self._stop_async())
+            self._loop.close()
+            self._loop = None
+
+        self._thread = threading.Thread(
+            target=_thread_main,
+            daemon=True,
+            name="hdgl-native-http",
+        )
+        self._thread.start()
+        if not self._started.wait(timeout=10):
+            raise RuntimeError("native HTTP server failed to start within 10s")
+
+    def stop(self) -> None:
+        """Stop the background server if it is running."""
+        if self._loop is None:
+            return
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        if self._thread:
+            self._thread.join(timeout=10)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

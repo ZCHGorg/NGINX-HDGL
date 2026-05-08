@@ -12,22 +12,22 @@ Replaces living_network_daemon.py with a three-layer architecture:
   Layer 1 — hdgl_lattice.py    : analog weights, EMA, fingerprints
   Layer 2 — hdgl_fileswap.py   : strand-addressed file routing, echo, migration
   Layer 3 — hdgl_node_server.py: per-node HTTP server (serve, proxy, gossip)
-             hdgl_ingress.py   : NGINX config generator (strand upstreams)
+                         hdgl_http_server_native.py: public strand-native HTTP ingress
 
 Each cycle:
   1. Health-check all known peers via /node_info
   2. Update EMA feedback for each live peer
   3. Gossip this node's info to all peers (so they update their lattice)
   4. Run fileswap rebalance (migrate files if strand authority shifted)
-  5. Regenerate NGINX config with current strand weights
+    5. Refresh in-memory routing state for public native HTTP serving
   6. Log cluster fingerprint, alive nodes, authority map
 
 Boot sequence:
   1. Load lattice state from disk (if any)
-  2. Start node HTTP server (immediately live)
+    2. Start internal node server and public native HTTP server
   3. Begin health loop
   4. On first successful peer contact: emit "cluster joined" log
-  5. In SIMULATION_MODE: print matrix, skip SSH/NGINX/SCP
+    5. In SIMULATION_MODE: print matrix, skip SSH/SCP
 
 Usage:
   python3 hdgl_host.py                  # uses env vars
@@ -128,6 +128,7 @@ def _resolve_local_node() -> str:
 LOCAL_NODE        = _resolve_local_node()
 SSH_USER          = os.getenv("LN_SSH_USER",          "deployuser")
 NODE_PORT         = int(os.getenv("LN_NODE_PORT",     "8090"))
+HTTP_PORT         = int(os.getenv("LN_HTTP_PORT",     "8080"))
 HEALTH_INTERVAL   = int(os.getenv("LN_HEALTH_INTERVAL", "30"))
 GOSSIP_PORT       = int(os.getenv("LN_GOSSIP_PORT",   "8090"))
 SIMULATION_MODE   = os.getenv("LN_SIMULATION", "1") == "1"
@@ -159,7 +160,7 @@ from hdgl_site_config import (
 from hdgl_lattice    import HDGLLattice
 from hdgl_fileswap   import HDGLFileswap
 from hdgl_node_server import HDGLNodeServer
-from hdgl_ingress    import generate_nginx_conf, write_nginx_conf
+from hdgl_http_server_native import HDGLHTTPServer
 from hdgl_dns        import HDGLResolver
 
 SITE_CONFIG = load_site_config()
@@ -177,8 +178,9 @@ class HDGLHost:
     Each instance manages:
       - Its own lattice view (updated from peer /node_info)
       - Its local fileswap (serves authority files, caches proxied ones)
-      - Its node HTTP server (handles incoming requests)
-      - Its NGINX config (regenerated each cycle with current weights)
+            - Its internal node HTTP server (gossip, /node_info, /serve)
+            - Its public native HTTP server (per-request strand routing)
+            - Its DNS resolver and persistent lattice state
     """
 
     def __init__(self):
@@ -189,6 +191,12 @@ class HDGLHost:
         self.lattice     = self._load_or_create_lattice()
         self.swap        = HDGLFileswap(self.lattice, local_node=LOCAL_NODE)
         self.node_server = HDGLNodeServer(self.lattice, self.swap, port=NODE_PORT)
+        self.native_server = HDGLHTTPServer(
+            self.lattice,
+            self.swap,
+            local_node=LOCAL_NODE,
+            http_port=HTTP_PORT,
+        )
         self.resolver    = HDGLResolver(
             self.lattice, DNS_DOMAIN_MAP, LOCAL_NODE,
             port=int(os.getenv("LN_DNS_PORT", "5353"))
@@ -203,43 +211,43 @@ class HDGLHost:
         if SIMULATION_MODE or DRY_RUN:
             self.swap._dry_run_override = True
 
-    # ── BOOT ──────────────────────────────────────────────────────────────────
-
     def start(self):
-        """Boot sequence: state, server, loop."""
+        """Boot sequence: state, servers, simulation audit or health loop."""
         log.info(f"{'─'*60}")
-        log.info(f"HDGL Distributed Host starting")
-        log.info(f"  Local node : {LOCAL_NODE}:{NODE_PORT}")
-        log.info(f"  Mode       : {'SIMULATION' if SIMULATION_MODE else 'LIVE'}"
-                 f"{' + DRY_RUN' if DRY_RUN else ''}")
-        log.info(f"  Known peers: {self.known_nodes}")
+        log.info("HDGL Distributed Host starting")
+        log.info(f"  Local node   : {LOCAL_NODE}")
+        log.info(f"  Public HTTP  : {HTTP_PORT}")
+        log.info(f"  Internal API : {NODE_PORT}")
+        log.info(
+            f"  Mode         : {'SIMULATION' if SIMULATION_MODE else 'LIVE'}"
+            f"{' + DRY_RUN' if DRY_RUN else ''}"
+        )
+        log.info(f"  Known peers  : {self.known_nodes}")
+        log.info("  Routing      : phi_tau(path) → strand → authority")
         log.info(f"{'─'*60}")
 
-        # Seed local node into lattice
         self.lattice.update(LOCAL_NODE, 10.0, self._local_storage_gb())
 
-        # Start HTTP server and DNS resolver immediately
         self.node_server.start()
-        log.info(f"Node server live on :{NODE_PORT}")
+        log.info(f"[host] node server live on :{NODE_PORT}")
+        self.native_server.start_background()
+        log.info(f"[host] native HTTP server live on :{HTTP_PORT}")
         self.resolver.start()
 
-        # Boot encoder check
         self._boot_encoder_check()
 
-        # Simulation audit
         if SIMULATION_MODE:
             self._run_simulation_audit()
             return
 
-        # Signal handlers
         signal.signal(signal.SIGTERM, self._handle_signal)
         signal.signal(signal.SIGINT,  self._handle_signal)
 
-        # Main loop
         try:
             self._health_loop()
         except Exception as e:
             log.error(f"Health loop crashed: {e}", exc_info=True)
+            raise
         finally:
             self._shutdown()
 
@@ -254,7 +262,6 @@ class HDGLHost:
             self._gossip_self(healthy)
             self._provisioner_cycle(healthy)   # NORM→SCALE→ENERGY→FOLD256
             self._rebalance(healthy)
-            self._update_nginx(healthy)
             self._renew_certs()
             self._persist_state()
             self._log_cycle_summary(healthy)
@@ -360,7 +367,6 @@ class HDGLHost:
             )
             content_type = "application/octet-stream"
         except Exception:
-            # JSON fallback
             payload = json.dumps({
                 "node":                LOCAL_NODE,
                 "latency":             self.lattice._latency_ema.get(LOCAL_NODE, 50),
@@ -421,21 +427,8 @@ class HDGLHost:
             log.error(f"[rebalance] error: {e}", exc_info=True)
 
     def _update_nginx(self, healthy: List[Dict]):
-        """Regenerate NGINX config with current strand weights and reload."""
-        if not healthy:
-            log.warning("[nginx] skipping update — no healthy nodes")
-            return
-        try:
-            conf = generate_nginx_conf(
-                healthy_nodes=healthy,
-                service_registry=SERVICE_REGISTRY,
-                lattice=self.lattice,
-                local_node=LOCAL_NODE,
-            )
-            write_nginx_conf(conf, dry_run=DRY_RUN)
-            self.resolver.update_domain_map(get_dns_domain_map(SITE_CONFIG))
-        except Exception as e:
-            log.error(f"[nginx] update failed: {e}", exc_info=True)
+        """Compatibility shim for v0.3. Keep DNS domain map current."""
+        self.resolver.update_domain_map(get_dns_domain_map(SITE_CONFIG))
 
     def _renew_certs(self):
         """Run certbot renewal (once per day max via systemd timer or here)."""
@@ -529,16 +522,18 @@ class HDGLHost:
         self.swap._dry_run_override = True
         print(self.swap.simulation_matrix())
 
-        log.info("── NGINX config preview ────────────────────────────")
-        conf = generate_nginx_conf(dummy_nodes, SERVICE_REGISTRY,
-                                   self.lattice, LOCAL_NODE)
-        # Print just the upstream section for brevity
-        upstream_section = "\n".join(
-            l for l in conf.split("\n")
-            if any(x in l for x in ["upstream", "server ", "weight=", "# Strand", "# HDGL"])
-        )[:2000]
-        print(upstream_section)
-        log.info(f"Full config: {len(conf)} chars")
+        log.info("── Native HTTP routing preview ─────────────────────")
+        sample_paths = list(PRIMARY_SITE.get("storage_paths", [])) or ["/storage/"]
+        sample_paths.extend(f"/{svc}/config.json" for svc in SERVICE_REGISTRY)
+        for path in sample_paths[:8]:
+            from hdgl_fileswap import _phi_tau, _strand_for_path, _omega_ttl
+            tau = _phi_tau(path)
+            strand = _strand_for_path(path)
+            authority, weight = self.lattice.top_node_per_strand()[strand]
+            log.info(
+                f"  {path:<28} τ={tau:.3f}  strand={strand}  "
+                f"auth={authority}  weight={weight:.5f}  TTL={_omega_ttl(strand):.0f}s"
+            )
 
         log.info("── Strand authority map ────────────────────────────")
         top = self.lattice.top_node_per_strand()
@@ -650,7 +645,8 @@ class HDGLHost:
         self._running = False
 
     def _shutdown(self):
-        log.info("[host] shutting down node server and DNS resolver")
+        log.info("[host] shutting down native HTTP server, node server, and DNS resolver")
+        self.native_server.stop()
         self.node_server.stop()
         self.resolver.stop()
         self._persist_state()

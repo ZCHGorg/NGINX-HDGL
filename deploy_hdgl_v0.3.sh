@@ -42,12 +42,19 @@ HDGL_LOCAL_NODE="${HDGL_LOCAL_NODE:-$(hostname -I | awk '{print $1}')}"
 HDGL_PEER_NODES="${HDGL_PEER_NODES:-}"
 HDGL_DEPLOY_KEY="${HDGL_DEPLOY_KEY:-}"
 HDGL_FILESWAP_MAX_SIZE="${HDGL_FILESWAP_MAX_SIZE:-10}"
+HDGL_CLUSTER_SECRET="${HDGL_CLUSTER_SECRET:-$(python3 - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
+)}"
 
 INSTALL_DIR="/opt/hdgl"
 VENV_DIR="$INSTALL_DIR/venv"
 LOG_DIR="/var/log/hdgl"
 SWAP_DIR="/opt/hdgl_swap"
 CACHE_DIR="/opt/hdgl_cache"
+TLS_DIR="$INSTALL_DIR/tls"
+SITE_CONFIG_FILE="$INSTALL_DIR/site_config.json"
 SERVICE_NAME="hdgl-daemon-v0.3"
 DEPLOY_USER="deployuser"
 
@@ -78,6 +85,7 @@ apt-get install -y -qq \
     python3 \
     python3-pip \
     python3-venv \
+    openssl \
     openssh-client \
     openssh-server \
     curl \
@@ -126,7 +134,7 @@ chown -R "$DEPLOY_USER:$DEPLOY_USER" "$SSH_DIR"
 # ── DIRECTORIES ───────────────────────────────────────────────────────────────
 section "Directories"
 
-for d in "$INSTALL_DIR" "$LOG_DIR" "$SWAP_DIR" "$CACHE_DIR"; do
+for d in "$INSTALL_DIR" "$LOG_DIR" "$SWAP_DIR" "$CACHE_DIR" "$TLS_DIR"; do
     mkdir -p "$d"
     chown "$DEPLOY_USER:$DEPLOY_USER" "$d"
     ok "Created: $d"
@@ -153,6 +161,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REQUIRED_FILES=(
     "hdgl_lattice.py"
     "hdgl_fileswap.py"
+    "hdgl_site_config.py"
     "hdgl_node_server.py"
     "hdgl_http_server_native.py"  # NEW: native HTTP server replaces NGINX
     "hdgl_host.py"
@@ -161,6 +170,7 @@ REQUIRED_FILES=(
     "hdgl_netboot.py"
     "hdgl_moire.py"
     "hdgl_audit.py"
+    "hdgl_audit_v0.3.py"
     "hdgl_stability_sim.py"
     "hdgl_verify_and_readme.py"
 )
@@ -197,10 +207,14 @@ cat > "$ENV_FILE" << ENV
 # ── CORE ──────────────────────────────────────────────────────────────────────
 LN_LOCAL_NODE=$HDGL_LOCAL_NODE
 LN_SSH_USER=$DEPLOY_USER
-LN_GOSSIP_PORT=8080
+LN_SITE_CONFIG=$SITE_CONFIG_FILE
+LN_NODE_PORT=8090
+LN_GOSSIP_PORT=8090
 LN_HEALTH_INTERVAL=30
 LN_HTTP_PORT=8080
 LN_HTTPS_PORT=8443
+LN_SSL_CERT=$TLS_DIR/hdgl.crt
+LN_SSL_KEY=$TLS_DIR/hdgl.key
 LN_FILESWAP_ROOT=$SWAP_DIR
 LN_FILESWAP_CACHE=$CACHE_DIR
 LN_FILESWAP_MAX_SIZE=$HDGL_FILESWAP_MAX_SIZE
@@ -209,57 +223,79 @@ LN_HTTP_POOL_SIZE=16
 LN_HTTP_CONN_TIMEOUT=30.0
 
 # ── SECURITY ──────────────────────────────────────────────────────────────────
-LN_CLUSTER_SECRET=
+LN_CLUSTER_SECRET=$HDGL_CLUSTER_SECRET
 
 # ── MODE ──────────────────────────────────────────────────────────────────────
 LN_SIMULATION=1
 LN_DRY_RUN=1
+LN_CERTBOT_ENABLED=0
 ENV
 
 chmod 600 "$ENV_FILE"
 chown "$DEPLOY_USER:$DEPLOY_USER" "$ENV_FILE"
 ok "Environment file: $ENV_FILE"
 
-# ── PATCH DAEMON WITH LOCAL CONFIG ────────────────────────────────────────────
-section "Patching daemon with local node config"
+# ── TLS BOOTSTRAP ────────────────────────────────────────────────────────────
+section "TLS bootstrap"
 
-PEER_LIST_PY="\"$HDGL_LOCAL_NODE\""
-if [[ -n "$HDGL_PEER_NODES" ]]; then
-    while IFS=',' read -ra PEERS; do
-        for peer in "${PEERS[@]}"; do
-            peer=$(echo "$peer" | xargs)
-            [[ -n "$peer" ]] && PEER_LIST_PY+=", \"$peer\""
-        done
-    done <<< "$HDGL_PEER_NODES"
+if [[ ! -f "$TLS_DIR/hdgl.crt" || ! -f "$TLS_DIR/hdgl.key" ]]; then
+    openssl req -x509 -nodes -newkey rsa:4096 \
+        -keyout "$TLS_DIR/hdgl.key" \
+        -out "$TLS_DIR/hdgl.crt" \
+        -days 365 \
+        -subj "/CN=$HDGL_LOCAL_NODE" >/dev/null 2>&1
+    ok "Self-signed TLS certificate generated"
+else
+    ok "Existing TLS certificate preserved"
 fi
 
-PATCH_SCRIPT=$(mktemp /tmp/hdgl_patch_XXXXXX.py)
-cat > "$PATCH_SCRIPT" << ENDOFPATCH
-import sys, re, ast
+chmod 600 "$TLS_DIR/hdgl.key"
+chmod 644 "$TLS_DIR/hdgl.crt"
+chown "$DEPLOY_USER:$DEPLOY_USER" "$TLS_DIR/hdgl.key" "$TLS_DIR/hdgl.crt"
 
-path = "${INSTALL_DIR}/hdgl_host.py"
-content = open(path).read()
+# ── SITE CONFIG ───────────────────────────────────────────────────────────────
+section "Site configuration"
 
-content = re.sub(
-    r'SEED_NODES\s*=\s*\[.*?\]',
-    'SEED_NODES = [${PEER_LIST_PY}]',
-    content, flags=re.DOTALL
-)
+export HDGL_PEER_NODES
 
-try:
-    ast.parse(content)
-except SyntaxError as e:
-    print(f"PATCH ABORTED - syntax error: {e}", file=sys.stderr)
-    sys.exit(1)
+python3 - "$SITE_CONFIG_FILE" <<'PY'
+import json
+import os
+import sys
 
-open(path, "w").write(content)
-print("patched")
-ENDOFPATCH
+target = sys.argv[1]
 
-python3 "$PATCH_SCRIPT" \
-    && ok "Daemon patched with local config" \
-    || die "Patch script failed"
-rm -f "$PATCH_SCRIPT"
+def split_csv(value: str):
+    return [item.strip() for item in value.split(',') if item.strip()]
+
+config = {
+    "seed_nodes": split_csv(os.getenv("HDGL_PEER_NODES", "")),
+    "primary_site": {
+        "enabled": False,
+        "canonical_domain": "",
+        "aliases": [],
+        "redirect_domains": [],
+        "storage_paths": ["/storage/"],
+        "discourse_socket": "",
+    },
+    "services": {
+        "storage": {
+            "mode": "proxy",
+            "domain": "",
+            "aliases": [],
+            "port": 8080,
+        }
+    },
+}
+
+with open(target, "w", encoding="utf-8") as handle:
+    json.dump(config, handle, indent=2)
+    handle.write("\n")
+PY
+
+chmod 600 "$SITE_CONFIG_FILE"
+chown "$DEPLOY_USER:$DEPLOY_USER" "$SITE_CONFIG_FILE"
+ok "Site config written: $SITE_CONFIG_FILE"
 
 # ── SYSTEMD SERVICE (v0.3) ────────────────────────────────────────────────────
 section "HDGL v0.3 systemd service (daemon + native HTTP server)"
@@ -302,23 +338,23 @@ section "Firewall (v0.3: HTTP + HTTPS only)"
 
 ufw --force enable
 ufw allow ssh
-ufw allow 80/tcp
-ufw allow 443/tcp
-ok "UFW rules applied (80, 443, ssh)"
+ufw allow 8080/tcp
+ufw allow 8443/tcp
+ok "UFW rules applied (8080, 8443, ssh)"
 
 if [[ -n "$HDGL_PEER_NODES" ]]; then
     while IFS=',' read -ra PEERS; do
         for peer in "${PEERS[@]}"; do
             peer=$(echo "$peer" | xargs)
             [[ -n "$peer" ]] && {
-                ufw allow from "$peer" to any port 8080 comment "HDGL peer $peer"
-                ok "Peer $peer allowed on :8080"
+                ufw allow from "$peer" to any port 8090 comment "HDGL peer $peer"
+                ok "Peer $peer allowed on :8090"
             }
         done
     done <<< "$HDGL_PEER_NODES"
 fi
 
-ufw allow from "$HDGL_LOCAL_NODE" to any port 8080 comment "HDGL self" 2>/dev/null || true
+ufw allow from "$HDGL_LOCAL_NODE" to any port 8090 comment "HDGL self" 2>/dev/null || true
 
 # ── DNS port 53 redirect ──────────────────────────────────────────────────────
 section "DNS port 53 redirect"
@@ -344,7 +380,7 @@ section "Running audit suite"
 
 cd "$INSTALL_DIR"
 LN_SIMULATION=1 LN_DRY_RUN=1 \
-    "$VENV_DIR/bin/python3" "$INSTALL_DIR/hdgl_audit.py" \
+    "$VENV_DIR/bin/python3" "$INSTALL_DIR/hdgl_audit_v0.3.py" \
     && ok "Audit: all tests passed" \
     || warn "Audit had failures — review before going live"
 
@@ -372,7 +408,8 @@ ${BOLD}Files installed:${RESET}
   ├── hdgl_host.py
   ├── hdgl_http_server_native.py  ← NEW: handles all HTTP routing
   ├── hdgl_fileswap.py
-  ├── hdgl_audit.py
+    ├── hdgl_audit_v0.3.py
+    ├── site_config.json
   ├── .env
   └── venv/
 
@@ -388,9 +425,10 @@ ${BOLD}Metrics (when live):${RESET}
   curl http://$HDGL_LOCAL_NODE:8080/hdgl/metrics
   curl http://$HDGL_LOCAL_NODE:8080/hdgl/strand-map
   curl http://$HDGL_LOCAL_NODE:8080/hdgl/pool-status
+    curl -k https://$HDGL_LOCAL_NODE:8443/hdgl/health
 
 ${BOLD}To go live:${RESET}
-  1. Run audit:   $VENV_DIR/bin/python3 $INSTALL_DIR/hdgl_audit.py
+    1. Run audit:   $VENV_DIR/bin/python3 $INSTALL_DIR/hdgl_audit_v0.3.py
   2. Edit:        $ENV_FILE
                   LN_SIMULATION=0
                   LN_DRY_RUN=0
