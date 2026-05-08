@@ -6,29 +6,99 @@
 #define MAP_W 5
 #define MAP_H 5
 #define INPUT_LEN 128
+#define INV_CAP 8
+
+typedef struct {
+    const char *name;
+    const char *description;
+    const char *item;
+    const char *npc;
+    const char *npc_line;
+} room_t;
 
 typedef struct {
     int x;
     int y;
 } player_t;
 
-static const char *room_name(int x, int y) {
-    if (x == 2 && y == 2) {
-        return "Town Crossroads";
+typedef struct {
+    player_t player;
+    room_t rooms[MAP_H][MAP_W];
+    int item_taken[MAP_H][MAP_W];
+    const char *inventory[INV_CAP];
+    int inv_count;
+} game_t;
+
+static void init_room(room_t *room,
+                      const char *name,
+                      const char *description,
+                      const char *item,
+                      const char *npc,
+                      const char *npc_line) {
+    room->name = name;
+    room->description = description;
+    room->item = item;
+    room->npc = npc;
+    room->npc_line = npc_line;
+}
+
+static void init_game(game_t *game) {
+    int y;
+    int x;
+
+    memset(game, 0, sizeof(*game));
+    game->player.x = 2;
+    game->player.y = 2;
+
+    for (y = 0; y < MAP_H; y++) {
+        for (x = 0; x < MAP_W; x++) {
+            init_room(&game->rooms[y][x],
+                      "Dust Trail",
+                      "A wind-carved trail cuts through open scrubland.",
+                      NULL,
+                      NULL,
+                      NULL);
+        }
     }
-    if (x == 0 && y == 0) {
-        return "Northwest Ridge";
-    }
-    if (x == 4 && y == 0) {
-        return "Northeast Watch";
-    }
-    if (x == 0 && y == 4) {
-        return "Southwest Flats";
-    }
-    if (x == 4 && y == 4) {
-        return "Southeast Gate";
-    }
-    return "Dust Trail";
+
+    init_room(&game->rooms[2][2],
+              "Town Crossroads",
+              "Four roads meet beside a cracked stone well and old signpost.",
+              "rusty key",
+              "marshal",
+              "Keep your eyes open. Frontierland remembers every footprint.");
+
+    init_room(&game->rooms[0][0],
+              "Northwest Ridge",
+              "A high ridge with wide views and cold wind from the canyon.",
+              "ridge map",
+              NULL,
+              NULL);
+
+    init_room(&game->rooms[0][4],
+              "Northeast Watch",
+              "A weathered watch post overlooks the eastern perimeter.",
+              "signal flare",
+              "lookout",
+              "If smoke rises south, light the flare and run west.");
+
+    init_room(&game->rooms[4][0],
+              "Southwest Flats",
+              "Dry grass waves over low flats where old tracks disappear.",
+              "canteen",
+              NULL,
+              NULL);
+
+    init_room(&game->rooms[4][4],
+              "Southeast Gate",
+              "An iron gate marks the edge of settled ground.",
+              "gate token",
+              "gatekeeper",
+              "No one leaves empty-handed. Bring proof of purpose.");
+}
+
+static room_t *current_room(game_t *game) {
+    return &game->rooms[game->player.y][game->player.x];
 }
 
 static void trim_newline(char *s) {
@@ -50,11 +120,22 @@ static void print_intro(void) {
     printf("  FRONTIERLAND TERMINAL ONLINE\n");
     printf("  MUD Link: ACTIVE\n");
     printf("========================================\n\n");
-    printf("Commands: n s e w, look, map, help, quit\n\n");
+    printf("Commands: n s e w, look, map, get, inv, talk, help, quit\n\n");
 }
 
-static void print_location(const player_t *p) {
-    printf("You are at [%d,%d] - %s\n", p->x, p->y, room_name(p->x, p->y));
+static void print_location(game_t *game) {
+    player_t *p = &game->player;
+    room_t *room = current_room(game);
+
+    printf("You are at [%d,%d] - %s\n", p->x, p->y, room->name);
+    printf("%s\n", room->description);
+
+    if (room->item && !game->item_taken[p->y][p->x]) {
+        printf("Item here: %s\n", room->item);
+    }
+    if (room->npc) {
+        printf("You see: %s\n", room->npc);
+    }
 
     printf("Exits: ");
     if (p->y > 0) {
@@ -72,7 +153,8 @@ static void print_location(const player_t *p) {
     printf("\n");
 }
 
-static void print_map(const player_t *p) {
+static void print_map(const game_t *game) {
+    const player_t *p = &game->player;
     int y;
     int x;
     printf("\nMap (%dx%d):\n", MAP_W, MAP_H);
@@ -87,6 +169,53 @@ static void print_map(const player_t *p) {
         printf("\n");
     }
     printf("\n");
+}
+
+static void print_inventory(const game_t *game) {
+    int i;
+    if (game->inv_count == 0) {
+        printf("Inventory is empty.\n");
+        return;
+    }
+
+    printf("Inventory:\n");
+    for (i = 0; i < game->inv_count; i++) {
+        printf("- %s\n", game->inventory[i]);
+    }
+}
+
+static void pickup_item(game_t *game) {
+    player_t *p = &game->player;
+    room_t *room = current_room(game);
+
+    if (!room->item) {
+        printf("There is nothing to pick up here.\n");
+        return;
+    }
+
+    if (game->item_taken[p->y][p->x]) {
+        printf("You already collected the item from this room.\n");
+        return;
+    }
+
+    if (game->inv_count >= INV_CAP) {
+        printf("Your inventory is full.\n");
+        return;
+    }
+
+    game->inventory[game->inv_count++] = room->item;
+    game->item_taken[p->y][p->x] = 1;
+    printf("You pick up: %s\n", room->item);
+}
+
+static void talk_npc(game_t *game) {
+    room_t *room = current_room(game);
+    if (!room->npc) {
+        printf("No one is here to talk to.\n");
+        return;
+    }
+
+    printf("%s says: \"%s\"\n", room->npc, room->npc_line ? room->npc_line : "...");
 }
 
 static int move_player(player_t *p, const char *cmd) {
@@ -131,13 +260,12 @@ static int move_player(player_t *p, const char *cmd) {
 
 int main(void) {
     char input[INPUT_LEN];
-    player_t player;
+    game_t game;
 
-    player.x = 2;
-    player.y = 2;
+    init_game(&game);
 
     print_intro();
-    print_location(&player);
+    print_location(&game);
 
     for (;;) {
         printf("\nfrontierland> ");
@@ -159,27 +287,42 @@ int main(void) {
         }
 
         if (strcmp(input, "help") == 0) {
-            printf("Commands: n s e w, north south east west, look, map, help, quit\n");
+            printf("Commands: n s e w, north south east west, look, map, get, inv, talk, help, quit\n");
             continue;
         }
 
         if (strcmp(input, "look") == 0) {
-            print_location(&player);
+            print_location(&game);
             continue;
         }
 
         if (strcmp(input, "map") == 0) {
-            print_map(&player);
+            print_map(&game);
             continue;
         }
 
-        if (move_player(&player, input)) {
-            print_location(&player);
+        if (strcmp(input, "inv") == 0 || strcmp(input, "inventory") == 0) {
+            print_inventory(&game);
+            continue;
+        }
+
+        if (strcmp(input, "get") == 0 || strcmp(input, "take") == 0) {
+            pickup_item(&game);
+            continue;
+        }
+
+        if (strcmp(input, "talk") == 0) {
+            talk_npc(&game);
+            continue;
+        }
+
+        if (move_player(&game.player, input)) {
+            print_location(&game);
             continue;
         }
 
         printf("Unknown command: '%s'\n", input);
-        printf("Try: n s e w, look, map, help, quit\n");
+        printf("Try: n s e w, look, map, get, inv, talk, help, quit\n");
     }
 
     return 0;
