@@ -31,6 +31,9 @@ Each connected player sends periodic heartbeat updates with `hosting=true`.
 The gateway tracks active host peers and computes an assigned host per room.
 This creates a practical frontier model where all active players contribute host capacity.
 
+Room ownership is deterministic across active hosts and rebalanced as hosts
+join/leave (migration events are tracked in topology history).
+
 ## Build
 
 ```bash
@@ -63,3 +66,4 @@ gcc -std=c11 -O2 -Wall -Wextra -o frontierland/mud_terminal frontierland/mud_ter
 - `POST /api/session/command` with `{ "session_id": "...", "player_id": "...", "command": "look" }`
 - `POST /api/session/heartbeat` with `{ "session_id": "...", "player_id": "...", "hosting": true }`
 - `GET /api/session/state?session_id=...&player_id=...`
+- `GET /api/session/topology?session_id=...` (room owners + migration history)

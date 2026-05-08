@@ -46,6 +46,8 @@ class SessionState:
     created_at: float = field(default_factory=time.time)
     players: Dict[str, PlayerState] = field(default_factory=dict)
     taken_items: Dict[str, bool] = field(default_factory=dict)
+    room_owner: Dict[str, str] = field(default_factory=dict)
+    migrations: List[Dict[str, object]] = field(default_factory=list)
 
 
 def room_name(x: int, y: int) -> str:
@@ -119,6 +121,41 @@ def room_key(x: int, y: int) -> str:
     return f"{x},{y}"
 
 
+def recalc_topology(session: SessionState) -> None:
+    hosts = active_hosts(session)
+
+    if not hosts:
+        if session.room_owner:
+            session.room_owner = {}
+        return
+
+    next_owner: Dict[str, str] = {}
+    for y in range(MAP_H):
+        for x in range(MAP_W):
+            k = room_key(x, y)
+            idx = (x + (y * MAP_W)) % len(hosts)
+            next_owner[k] = hosts[idx].username
+
+    now = int(time.time())
+    for k, owner in next_owner.items():
+        prev = session.room_owner.get(k)
+        if prev is not None and prev != owner:
+            session.migrations.append(
+                {
+                    "room": k,
+                    "from": prev,
+                    "to": owner,
+                    "ts": now,
+                }
+            )
+
+    session.room_owner = next_owner
+
+    # Keep migration history bounded.
+    if len(session.migrations) > 128:
+        session.migrations = session.migrations[-128:]
+
+
 def ensure_zchg_uri(session_uri: str) -> bool:
     return session_uri.strip().lower().startswith("zchg://")
 
@@ -137,12 +174,11 @@ def active_hosts(session: SessionState) -> List[PlayerState]:
 def player_snapshot(session: SessionState, player: PlayerState) -> Dict[str, object]:
     room = room_data(player.x, player.y)
     item_visible = None if (room.item and session.taken_items.get(room_key(player.x, player.y), False)) else room.item
+    recalc_topology(session)
     hosts = active_hosts(session)
     host_names = [p.username for p in hosts]
 
-    assigned_host = None
-    if hosts:
-        assigned_host = hosts[(player.x + player.y) % len(hosts)].username
+    assigned_host = session.room_owner.get(room_key(player.x, player.y))
 
     return {
         "x": player.x,
@@ -158,6 +194,17 @@ def player_snapshot(session: SessionState, player: PlayerState) -> Dict[str, obj
         "players_online": sorted([p.username for p in session.players.values()]),
         "active_hosts": host_names,
         "assigned_host": assigned_host,
+        "recent_migrations": session.migrations[-5:],
+    }
+
+
+def topology_snapshot(session: SessionState) -> Dict[str, object]:
+    recalc_topology(session)
+    return {
+        "session_uri": session.session_uri,
+        "active_hosts": [p.username for p in active_hosts(session)],
+        "room_owner": dict(session.room_owner),
+        "migrations": session.migrations[-32:],
     }
 
 
@@ -469,6 +516,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"state": player_snapshot(session, player)})
             return
 
+        if parsed.path == "/api/session/topology":
+            if not self._protocol_ok():
+                self._send_json(426, {"error": "zchg:// protocol header required"})
+                return
+
+            q = parse_qs(parsed.query)
+            session_id = q.get("session_id", [""])[0]
+            session = SESSIONS.get(session_id)
+            if not session:
+                self._send_json(404, {"error": "session not found"})
+                return
+
+            self._send_json(200, {"topology": topology_snapshot(session)})
+            return
+
         self._send_json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
@@ -507,6 +569,7 @@ class Handler(BaseHTTPRequestHandler):
             player_id = uuid.uuid4().hex[:10]
             player = PlayerState(player_id=player_id, username=username)
             session.players[player_id] = player
+            recalc_topology(session)
 
             self._send_json(
                 200,
@@ -548,11 +611,13 @@ class Handler(BaseHTTPRequestHandler):
 
             player.hosting = bool(payload.get("hosting", True))
             player.last_seen = time.time()
+            recalc_topology(session)
             self._send_json(
                 200,
                 {
                     "ok": True,
                     "active_hosts": [p.username for p in active_hosts(session)],
+                    "owned_rooms": [k for k, owner in session.room_owner.items() if owner == player.username],
                 },
             )
             return
