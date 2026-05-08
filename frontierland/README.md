@@ -1,69 +1,142 @@
-# Frontierland Terminal MUD (Prototype)
+# Frontierland v0.6-c-frontierland
 
-A minimal terminal-based movement loop with cardinal navigation.
+Frontierland is a branch-specific MUD experience built on zchg protocol semantics.
 
-## Browser Terminal (zchg:// Gateway)
+It includes:
 
-Run the browser gateway:
+- A native terminal game loop in C.
+- A browser-access gateway in Python.
+- zchg protocol-gated session APIs.
+- Cooperative host participation where active players contribute hosting while online.
+- Deterministic room ownership and migration tracking when host topology changes.
+
+## Quick Start
+
+### 1) Run Terminal Mode
+
+```bash
+gcc -std=c11 -O2 -Wall -Wextra -o frontierland/mud_terminal frontierland/mud_terminal.c
+./frontierland/mud_terminal
+```
+
+### 2) Run Browser Gateway
 
 ```bash
 python3 frontierland/browser_gateway.py
 ```
 
-Then open:
+Open:
 
 ```text
 http://127.0.0.1:8091/
 ```
 
-### Protocol Gate
+## What Makes Frontierland Different
 
-The browser bridge enforces zchg intent via headers:
+### zchg Protocol Gating
 
-- `X-ZCHG-Scheme: zchg://`
-- `X-ZCHG-Protocol: zchg://;v=0.6-frontierland`
+Browser API calls require protocol headers:
 
-Session creation also requires a URI that starts with `zchg://`.
+- X-ZCHG-Scheme: zchg://
+- X-ZCHG-Protocol: zchg://;v=0.6-frontierland
+
+Session creation also enforces a zchg session URI.
 
 ### Cooperative Hosting While Playing
 
-Each connected player sends periodic heartbeat updates with `hosting=true`.
-The gateway tracks active host peers and computes an assigned host per room.
-This creates a practical frontier model where all active players contribute host capacity.
+Each active player sends heartbeats with hosting status. The gateway:
 
-Room ownership is deterministic across active hosts and rebalanced as hosts
-join/leave (migration events are tracked in topology history).
+- Tracks active host peers.
+- Assigns room ownership deterministically across hosts.
+- Records migration events when hosts join, leave, or stop hosting.
 
-## Build
+This provides a practical collaborative hosting model for live gameplay.
 
-```bash
-gcc -std=c11 -O2 -Wall -Wextra -o frontierland/mud_terminal frontierland/mud_terminal.c
+## Gameplay Commands
+
+Terminal and browser command set:
+
+- n / north
+- s / south
+- e / east
+- w / west
+- look
+- map
+- get / take
+- inv / inventory
+- talk
+- help
+- quit
+
+## API Reference
+
+### POST /api/session/start
+
+Start or join a session URI.
+
+Payload:
+
+```json
+{
+	"user": "alice",
+	"session_uri": "zchg://frontierland/session/main"
+}
 ```
 
-## Run
+### POST /api/session/command
 
-```bash
-./frontierland/mud_terminal
+Execute player command within a session.
+
+Payload:
+
+```json
+{
+	"session_id": "...",
+	"player_id": "...",
+	"command": "look"
+}
 ```
 
-## Commands
+### POST /api/session/heartbeat
 
-- `n` / `north`
-- `s` / `south`
-- `e` / `east`
-- `w` / `west`
-- `look`
-- `map`
-- `get` / `take` (pick up room item)
-- `inv` / `inventory` (show inventory)
-- `talk` (speak with room NPC if present)
-- `help`
-- `quit`
+Update host participation and liveness.
 
-## Browser API (for integration)
+Payload:
 
-- `POST /api/session/start` with `{ "user": "name", "session_uri": "zchg://..." }`
-- `POST /api/session/command` with `{ "session_id": "...", "player_id": "...", "command": "look" }`
-- `POST /api/session/heartbeat` with `{ "session_id": "...", "player_id": "...", "hosting": true }`
-- `GET /api/session/state?session_id=...&player_id=...`
-- `GET /api/session/topology?session_id=...` (room owners + migration history)
+```json
+{
+	"session_id": "...",
+	"player_id": "...",
+	"hosting": true
+}
+```
+
+### GET /api/session/state
+
+Current player world state.
+
+Query:
+
+```text
+/api/session/state?session_id=...&player_id=...
+```
+
+### GET /api/session/topology
+
+Session host topology, room-owner map, and migration history.
+
+Query:
+
+```text
+/api/session/topology?session_id=...
+```
+
+## Core Files
+
+- frontierland/mud_terminal.c: terminal gameplay engine
+- frontierland/browser_gateway.py: browser gateway, protocol gate, session and topology logic
+- frontierland/README.md: branch-specific project guide
+
+## Branch Contract
+
+This README is scoped to v0.6-c-frontierland and documents Frontierland as a standalone experience track.
