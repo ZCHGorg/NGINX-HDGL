@@ -160,6 +160,10 @@ SWAP_HTTP_PORT = int(os.getenv("LN_FILESWAP_HTTP_PORT", "8090"))
 SSH_USER     = os.getenv("LN_SSH_USER", "deployuser")
 DRY_RUN      = os.getenv("LN_DRY_RUN", "0") == "1"
 
+# Main swap file size limit (GB) — active authority node swap directory
+# Oldest files are cleaned up (LRU) when limit is exceeded
+SWAP_MAX_SIZE_GB = int(os.getenv("LN_FILESWAP_MAX_SIZE", "10"))
+
 # Passive warm-up controls for non-dominant nodes.
 # Real traffic fills SWAP_ROOT/passive until this budget, then tidy trims LRU.
 PASSIVE_SWAP_ENABLE = os.getenv("LN_PASSIVE_SWAP_ENABLE", "1") == "1"
@@ -488,6 +492,47 @@ class HDGLFileswap:
     # PUBLIC API
     # --------------------------------------------------
 
+    def _enforce_swap_size_limit(self) -> None:
+        """
+        Check active swap directory size and clean up oldest files if limit exceeded.
+        SWAP_MAX_SIZE_GB is loaded from LN_FILESWAP_MAX_SIZE environment (default 10 GB).
+        """
+        if SWAP_MAX_SIZE_GB <= 0:
+            return  # disabled if set to 0 or negative
+
+        max_bytes = SWAP_MAX_SIZE_GB * (1024 ** 3)
+        total_size = 0
+        files_by_mtime = []
+
+        # Scan all files in main swap directory (excluding passive subdirectory)
+        if SWAP_ROOT.exists():
+            for f in SWAP_ROOT.rglob("*"):
+                if f.is_file() and not str(f).startswith(str(self._passive_root)):
+                    size = f.stat().st_size
+                    mtime = f.stat().st_mtime
+                    total_size += size
+                    files_by_mtime.append((mtime, f, size))
+
+        # If under limit, nothing to do
+        if total_size <= max_bytes:
+            return
+
+        # Sort by mtime (oldest first) and delete until under limit
+        files_by_mtime.sort(key=lambda x: x[0])
+        freed = 0
+        for mtime, fpath, size in files_by_mtime:
+            if total_size - freed <= max_bytes:
+                break
+            try:
+                fpath.unlink()
+                freed += size
+                log.info(f"[fileswap] cleanup: removed {fpath} ({size} bytes)")
+            except Exception as e:
+                log.warning(f"[fileswap] cleanup failed: {fpath}: {e}")
+
+        if freed > 0:
+            log.info(f"[fileswap] freed {freed} bytes; swap now {total_size - freed} bytes")
+
     def write(self, path: str, data: bytes,
               broadcast: bool = True) -> SwapRoute:
         """
@@ -517,6 +562,9 @@ class HDGLFileswap:
             f"authority={authority}  size={len(data)}B  "
             f"ttl={_omega_ttl(strand_idx):.1f}s"
         )
+
+        # Enforce swap size limit before writing
+        self._enforce_swap_size_limit()
 
         _dry = DRY_RUN or getattr(self, "_dry_run_override", False)
         if authority == self.local_node or _dry:

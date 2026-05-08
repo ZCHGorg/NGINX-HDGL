@@ -52,6 +52,7 @@ section() { echo -e "\n${BOLD}══ $* ══${RESET}"; }
 HDGL_LOCAL_NODE="${HDGL_LOCAL_NODE:-$(hostname -I | awk '{print $1}')}"
 HDGL_PEER_NODES="${HDGL_PEER_NODES:-}"          # comma-separated, can be empty
 HDGL_DEPLOY_KEY="${HDGL_DEPLOY_KEY:-}"          # SSH pubkey path, optional
+HDGL_FILESWAP_MAX_SIZE="${HDGL_FILESWAP_MAX_SIZE:-10}"  # GB, default 10GB
 
 INSTALL_DIR="/opt/hdgl"
 VENV_DIR="$INSTALL_DIR/venv"
@@ -334,6 +335,7 @@ LN_FILESWAP_ROOT=$SWAP_DIR
 LN_FILESWAP_CACHE=$CACHE_DIR
 LN_FILESWAP_HTTP_PORT=8090
 LN_FILESWAP_TTL_BASE=3600
+LN_FILESWAP_MAX_SIZE=$HDGL_FILESWAP_MAX_SIZE
 
 # ── SECURITY ──────────────────────────────────────────────────────────────────
 # Generate with: openssl rand -hex 32
