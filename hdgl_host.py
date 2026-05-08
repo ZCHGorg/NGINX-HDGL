@@ -159,8 +159,8 @@ from hdgl_site_config import (
 
 from hdgl_lattice    import HDGLLattice
 from hdgl_fileswap   import HDGLFileswap
-from hdgl_node_server import HDGLNodeServer
-from hdgl_http_server_native import HDGLHTTPServer
+from hdgl_transport  import HDGLTransportServer
+from hdgl_transport_client import HDGLTransportClient
 from hdgl_dns        import HDGLResolver
 
 SITE_CONFIG = load_site_config()
@@ -190,13 +190,8 @@ class HDGLHost:
         self.known_nodes: List[str] = self._load_known_nodes()
         self.lattice     = self._load_or_create_lattice()
         self.swap        = HDGLFileswap(self.lattice, local_node=LOCAL_NODE)
-        self.node_server = HDGLNodeServer(self.lattice, self.swap, port=NODE_PORT)
-        self.native_server = HDGLHTTPServer(
-            self.lattice,
-            self.swap,
-            local_node=LOCAL_NODE,
-            http_port=HTTP_PORT,
-        )
+        self.transport   = HDGLTransportServer(self.lattice, self.swap, self, local_node=LOCAL_NODE)
+        self.transport_client = HDGLTransportClient(local_node=LOCAL_NODE)
         self.resolver    = HDGLResolver(
             self.lattice, DNS_DOMAIN_MAP, LOCAL_NODE,
             port=int(os.getenv("LN_DNS_PORT", "5353"))
@@ -228,10 +223,8 @@ class HDGLHost:
 
         self.lattice.update(LOCAL_NODE, 10.0, self._local_storage_gb())
 
-        self.node_server.start()
-        log.info(f"[host] node server live on :{NODE_PORT}")
-        self.native_server.start_background()
-        log.info(f"[host] native HTTP server live on :{HTTP_PORT}")
+        self.transport.start()
+        log.info(f"[host] unified transport live (HDGL frames, strand-routed)")
         self.resolver.start()
 
         self._boot_encoder_check()
@@ -250,6 +243,19 @@ class HDGLHost:
             raise
         finally:
             self._shutdown()
+
+    def _shutdown(self):
+        """Shut down all services."""
+        self._running = False
+        if self.transport:
+            self.transport.stop()
+        if self.transport_client:
+            self.transport_client.close_all()
+        if self.resolver:
+            self.resolver.stop()
+        if self.state_db:
+            self.state_db.close()
+        log.info("[host] shutdown complete")
 
     # ── HEALTH LOOP ───────────────────────────────────────────────────────────
 
@@ -348,49 +354,53 @@ class HDGLHost:
 
         return healthy
 
+    def _recv_gossip(self, gossip_data: Dict[str, Any], peer_ip: str):
+        """
+        Receive and process incoming gossip from a peer (via HDGL_MSG_GOSSIP frame).
+        Updates lattice with peer's announced state.
+        """
+        try:
+            node = gossip_data.get("node", peer_ip)
+            lat = gossip_data.get("latency", 50)
+            stor = gossip_data.get("storage_available_gb", 1.0)
+
+            # Update lattice with peer's state
+            self.lattice.observe_latency(node, lat)
+            self.lattice.update(node, lat, stor)
+
+            # Discover new peers
+            for peer in gossip_data.get("known_nodes", []):
+                if peer != LOCAL_NODE and _is_valid_cluster_ip(peer):
+                    if peer not in self.known_nodes:
+                        log.debug(f"[gossip] discovered new peer {peer} from {node}")
+                        self.known_nodes.append(peer)
+                        self._save_known_nodes()
+        except Exception as e:
+            log.debug(f"[gossip] recv error from {peer_ip}: {e}")
+
     def _gossip_self(self, healthy: List[Dict]):
         """
-        Announce this node's state to all healthy peers using binary protocol.
-        Binary: 16 bytes vs 104 bytes JSON = 83% reduction per gossip POST.
-        Falls back to JSON if binary import unavailable.
+        Announce this node's state to all healthy peers via HDGL_MSG_GOSSIP frames.
+        Unified transport replaces separate /gossip HTTP endpoints.
         """
         if DRY_RUN:
             return
 
-        try:
-            from hdgl_fileswap import encode_gossip
-            payload = encode_gossip(
-                node_ip     = LOCAL_NODE,
-                latency_ms  = self.lattice._latency_ema.get(LOCAL_NODE, 50),
-                storage_gb  = self._local_storage_gb(),
-                fingerprint = self.lattice.fingerprint(LOCAL_NODE),
-            )
-            content_type = "application/octet-stream"
-        except Exception:
-            payload = json.dumps({
-                "node":                LOCAL_NODE,
-                "latency":             self.lattice._latency_ema.get(LOCAL_NODE, 50),
-                "storage_available_gb": self._local_storage_gb(),
-                "fingerprint":         self.lattice.fingerprint(LOCAL_NODE),
-            }).encode()
-            content_type = "application/json"
+        gossip_data = {
+            "node":                LOCAL_NODE,
+            "latency":             self.lattice._latency_ema.get(LOCAL_NODE, 50),
+            "storage_available_gb": self._local_storage_gb(),
+            "fingerprint":         self.lattice.fingerprint(LOCAL_NODE),
+            "known_nodes":         self.known_nodes,
+            "authority_strands":   [chr(65+k) for k, (n, _) in self.lattice.top_node_per_strand().items() if n == LOCAL_NODE],
+        }
 
         for n in healthy:
             peer = n["node"]
             if peer == LOCAL_NODE:
                 continue
             try:
-                from hdgl_node_server import _sign_payload, _HMAC_HEADER
-                sig = _sign_payload(payload)
-                headers = {"Content-Type": content_type}
-                if sig:
-                    headers[_HMAC_HEADER] = sig
-                requests.post(
-                    f"http://{peer}:{NODE_PORT}/gossip",
-                    data=payload,
-                    headers=headers,
-                    timeout=2,
-                )
+                self.transport_client.send_gossip(peer, gossip_data)
             except Exception as e:
                 log.debug(f"[gossip] {peer}: {e}")
 
@@ -558,19 +568,21 @@ class HDGLHost:
     def _fetch_node_info(self, node: str,
                           retries: int = 3,
                           backoff: float = 1.5) -> tuple:
+        """Fetch node info via HDGL_MSG_INFO frame."""
         delay = 1.0
         for attempt in range(retries):
             try:
-                r = requests.get(
-                    f"http://{node}:{NODE_PORT}/node_info",
-                    timeout=2
-                )
-                if r.status_code == 200:
-                    try:
-                        return True, r.json()
-                    except ValueError as e:
-                        log.warning(f"[health] {node} malformed JSON: {e}")
-            except requests.RequestException as e:
+                info = self.transport_client.send_info_query(node)
+                if info is not None:
+                    # Merge in stored peer info to include known_nodes, fingerprint, etc.
+                    # Transport returns basic ack; combine with latest gossip state
+                    info.update({
+                        "health": "ok",
+                        "latency": info.get("latency", 50),
+                        "storage_available_gb": info.get("storage_available_gb", 1.0),
+                    })
+                    return True, info
+            except Exception as e:
                 log.debug(f"[health] {node} attempt {attempt+1}: {e}")
             if attempt < retries - 1:
                 time.sleep(delay)
@@ -643,16 +655,6 @@ class HDGLHost:
     def _handle_signal(self, signum, frame):
         log.info(f"[host] signal {signum} received — shutting down")
         self._running = False
-
-    def _shutdown(self):
-        log.info("[host] shutting down native HTTP server, node server, and DNS resolver")
-        self.native_server.stop()
-        self.node_server.stop()
-        self.resolver.stop()
-        self._persist_state()
-        self.state_db.close()
-        log.info("[host] shutdown complete")
-
 
 # ── ENTRY POINT ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
