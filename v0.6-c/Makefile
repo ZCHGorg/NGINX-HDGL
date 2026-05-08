@@ -36,12 +36,13 @@ OBJECTS         = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 # Targets
 TARGET_DAEMON   = $(BINDIR)/hdgl_daemon
 TARGET_TEST     = $(BINDIR)/hdgl_test
+TARGET_BENCH    = $(BINDIR)/hdgl_bench
 
 # ============================================================================
 # Build Rules
 # ============================================================================
 
-.PHONY: all build clean install test help debug
+.PHONY: all build clean install test help debug bench
 
 all: build
 
@@ -70,6 +71,14 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c $(HEADERS)
 debug: CFLAGS += $(DEBUG_FLAGS)
 debug: clean build
 	@echo "✓ Debug build complete"
+
+# ============================================================================
+# Benchmark
+# ============================================================================
+
+bench: $(BINDIR) $(OBJDIR) $(SRCDIR)/hdgl_bench.c
+	$(CC) $(CFLAGS) -I$(INCDIR) -o $(TARGET_BENCH) $(SRCDIR)/hdgl_bench.c $(LDFLAGS)
+	@echo "✓ Benchmark compiled: $(TARGET_BENCH)"
 
 # ============================================================================
 # Testing

@@ -91,6 +91,35 @@ v0.6-c/
 ```bash
 cd v0.6-c
 make build
+```
+
+### Benchmark
+
+Measure performance (throughput, latency P50/P95/P99):
+
+```bash
+# Terminal 1: Start the daemon
+make build && ./bin/hdgl_daemon
+
+# Terminal 2: Run 30-second benchmark with 1000 concurrent connections
+make bench
+./bin/hdgl_bench 127.0.0.1 8090 30 1000
+
+# Expected results:
+# ✓ Throughput: 200K+ req/sec
+# ✓ Latency P99: <1ms
+# ✓ Connection reuse: 96%+
+```
+
+### Performance Targets
+
+| Metric | Target | v0.6-c Status |
+|--------|--------|---------------|
+| Throughput | 200K+ req/sec | In benchmark |
+| Latency P99 | <1ms | In benchmark |
+| Memory | <10MB (10K conns) | In benchmark |
+| Connection reuse | 96%+ | In benchmark |
+| Startup time | <100ms | Implemented |
 
 # Output: bin/hdgl_daemon
 # Size: ~200KB stripped (vs ~50MB for Python v0.5)
