@@ -1,14 +1,14 @@
 /*
- * hdgl_lattice.c - Phi-Spiral Geometry Implementation
+ * zchg_lattice.c - Phi-Spiral Geometry Implementation
  *
- * Pure HDGL strand architecture in C
+ * Pure ZCHG strand architecture in C
  * - EMA-based latency smoothing
  * - Phi-spiral weight computation
  * - Phi-tau deterministic path routing
  * - Provisioner pipeline (NORM → SCALE → PHASESHIFT → OMEGAMULT → ENERGY → FOLD256)
  */
 
-#include "hdgl_lattice.h"
+#include "zchg_lattice.h"
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
@@ -17,18 +17,18 @@
  * Constants
  * ============================================================================ */
 
-#define HDGL_PHI_VALUE              1.618033988749894848204586834365638
-#define HDGL_FIBONACCI_SCALE        1.6180339887      /* For OMEGAMULT */
+#define zchg_PHI_VALUE              1.618033988749894848204586834365638
+#define zchg_FIBONACCI_SCALE        1.6180339887      /* For OMEGAMULT */
 
 /* ============================================================================
  * EMA (Exponential Moving Average)
  * ============================================================================ */
 
-double hdgl_ema_update(double current_ema, double new_value) {
+double zchg_ema_update(double current_ema, double new_value) {
     if (current_ema < 0.001) {
         return new_value;  /* First measurement */
     }
-    return HDGL_EMA_ALPHA * new_value + (1.0 - HDGL_EMA_ALPHA) * current_ema;
+    return zchg_EMA_ALPHA * new_value + (1.0 - zchg_EMA_ALPHA) * current_ema;
 }
 
 /* ============================================================================
@@ -36,13 +36,13 @@ double hdgl_ema_update(double current_ema, double new_value) {
  * ============================================================================ */
 
 /* Phi-spiral amplification: w(x) = x^1.2 */
-double hdgl_phi_amplify(double x) {
+double zchg_phi_amplify(double x) {
     if (x <= 0.0) return 0.0;
     return pow(x, 1.2);
 }
 
 /* Convert raw EMA/storage to strand weight (1-100) */
-uint8_t hdgl_compute_strand_weight(double latency_ema, double storage_available) {
+uint8_t zchg_compute_strand_weight(double latency_ema, double storage_available) {
     /* Lower latency = higher weight
      * Higher storage = higher weight
      * Combined using phi-spiral function */
@@ -51,7 +51,7 @@ uint8_t hdgl_compute_strand_weight(double latency_ema, double storage_available)
     double storage_norm = fmin(storage_available / (1024.0 * 1024.0 * 1024.0), 1.0);  /* Storage in GB */
 
     double combined = (latency_norm * 0.6) + (storage_norm * 0.4);  /* 60% latency, 40% storage */
-    double amplified = hdgl_phi_amplify(combined);
+    double amplified = zchg_phi_amplify(combined);
 
     uint8_t weight = (uint8_t)(amplified * 100.0);
     if (weight < 1) weight = 1;  /* Floor to 1 (every healthy node gets traffic) */
@@ -65,7 +65,7 @@ uint8_t hdgl_compute_strand_weight(double latency_ema, double storage_available)
  * ============================================================================ */
 
 /* FNV-1a hash with phi spiral */
-uint64_t hdgl_compute_phi_tau(const char *path, size_t path_len) {
+uint64_t zchg_compute_phi_tau(const char *path, size_t path_len) {
     uint64_t hash = 0xcbf29ce484222325ULL;  /* FNV offset basis */
     const uint64_t phi_mult = 0x100000001b3ULL;  /* FNV prime */
 
@@ -73,22 +73,22 @@ uint64_t hdgl_compute_phi_tau(const char *path, size_t path_len) {
         hash ^= (uint64_t)path[i];
         hash *= phi_mult;
         /* Phi-spiral rotation: rotate hash by golden angle */
-        hash = ((hash << 13) | (hash >> 51)) ^ (uint64_t)(HDGL_PHI_VALUE * 1e9);
+        hash = ((hash << 13) | (hash >> 51)) ^ (uint64_t)(zchg_PHI_VALUE * 1e9);
     }
 
     return hash;
 }
 
 /* Map phi-tau to strand (0-7) */
-uint8_t hdgl_phi_tau_to_strand(uint64_t phi_tau) {
+uint8_t zchg_phi_tau_to_strand(uint64_t phi_tau) {
     /* Take lowest 3 bits: 0-7 */
     return (uint8_t)(phi_tau & 0x07);
 }
 
 /* Map phi-tau to authority node (round-robin over healthy peers) */
-uint32_t hdgl_phi_tau_to_authority(hdgl_lattice_t *lattice, uint64_t phi_tau) {
-    uint8_t strand = hdgl_phi_tau_to_strand(phi_tau);
-    return hdgl_lattice_get_strand_authority(lattice, strand);
+uint32_t zchg_phi_tau_to_authority(zchg_lattice_t *lattice, uint64_t phi_tau) {
+    uint8_t strand = zchg_phi_tau_to_strand(phi_tau);
+    return zchg_lattice_get_strand_authority(lattice, strand);
 }
 
 /* ============================================================================
@@ -96,14 +96,14 @@ uint32_t hdgl_phi_tau_to_authority(hdgl_lattice_t *lattice, uint64_t phi_tau) {
  * ============================================================================ */
 
 /* Get current authority for strand (highest weight peer) */
-uint32_t hdgl_lattice_get_strand_authority(hdgl_lattice_t *lattice, uint8_t strand_id) {
-    if (strand_id >= HDGL_STRAND_COUNT) return 0;
+uint32_t zchg_lattice_get_strand_authority(zchg_lattice_t *lattice, uint8_t strand_id) {
+    if (strand_id >= zchg_STRAND_COUNT) return 0;
 
     uint32_t best_peer = 0;
     uint8_t best_weight = 0;
 
     for (uint32_t i = 0; i < lattice->peer_count; i++) {
-        hdgl_peer_t *peer = &lattice->peers[i];
+        zchg_peer_t *peer = &lattice->peers[i];
         if (!peer->is_healthy) continue;
 
         uint8_t weight = peer->strands[strand_id].authority_weight;
@@ -121,9 +121,9 @@ uint32_t hdgl_lattice_get_strand_authority(hdgl_lattice_t *lattice, uint8_t stra
  * ============================================================================ */
 
 /* Apply gossip message from peer */
-int hdgl_lattice_apply_gossip(hdgl_lattice_t *lattice, uint32_t peer_ip, hdgl_gossip_msg_t *msg) {
+int zchg_lattice_apply_gossip(zchg_lattice_t *lattice, uint32_t peer_ip, zchg_gossip_msg_t *msg) {
     /* Find or create peer entry */
-    hdgl_peer_t *peer = NULL;
+    zchg_peer_t *peer = NULL;
     for (uint32_t i = 0; i < lattice->peer_count; i++) {
         if (lattice->peers[i].ip_addr == peer_ip) {
             peer = &lattice->peers[i];
@@ -131,7 +131,7 @@ int hdgl_lattice_apply_gossip(hdgl_lattice_t *lattice, uint32_t peer_ip, hdgl_go
         }
     }
 
-    if (!peer && lattice->peer_count < HDGL_MAX_PEERS) {
+    if (!peer && lattice->peer_count < zchg_MAX_PEERS) {
         peer = &lattice->peers[lattice->peer_count++];
         peer->ip_addr = peer_ip;
         peer->port = 8090;
@@ -141,7 +141,7 @@ int hdgl_lattice_apply_gossip(hdgl_lattice_t *lattice, uint32_t peer_ip, hdgl_go
     if (!peer) return -1;  /* Too many peers */
 
     /* Update strand weights from gossip */
-    for (uint8_t i = 0; i < HDGL_STRAND_COUNT; i++) {
+    for (uint8_t i = 0; i < zchg_STRAND_COUNT; i++) {
         peer->strands[i].authority_weight = msg->strand_weights[i];
     }
 
@@ -153,11 +153,11 @@ int hdgl_lattice_apply_gossip(hdgl_lattice_t *lattice, uint32_t peer_ip, hdgl_go
 }
 
 /* Update self metrics */
-int hdgl_lattice_update_self_metrics(hdgl_lattice_t *lattice, double latency_ms, double storage_available) {
-    for (uint8_t i = 0; i < HDGL_STRAND_COUNT; i++) {
-        lattice->my_strands[i].latency_ema = hdgl_ema_update(lattice->my_strands[i].latency_ema, latency_ms);
+int zchg_lattice_update_self_metrics(zchg_lattice_t *lattice, double latency_ms, double storage_available) {
+    for (uint8_t i = 0; i < zchg_STRAND_COUNT; i++) {
+        lattice->my_strands[i].latency_ema = zchg_ema_update(lattice->my_strands[i].latency_ema, latency_ms);
         lattice->my_strands[i].storage_available = storage_available;
-        lattice->my_strands[i].authority_weight = hdgl_compute_strand_weight(latency_ms, storage_available);
+        lattice->my_strands[i].authority_weight = zchg_compute_strand_weight(latency_ms, storage_available);
         lattice->my_strands[i].last_update = time(NULL);
     }
     return 0;
@@ -167,11 +167,11 @@ int hdgl_lattice_update_self_metrics(hdgl_lattice_t *lattice, double latency_ms,
  * Cluster Fingerprint
  * ============================================================================ */
 
-uint32_t hdgl_lattice_compute_fingerprint(hdgl_lattice_t *lattice) {
+uint32_t zchg_lattice_compute_fingerprint(zchg_lattice_t *lattice) {
     uint32_t fp = 0xFFFF0000;  /* Initial mask */
 
     /* XOR in strand weights */
-    for (uint8_t i = 0; i < HDGL_STRAND_COUNT; i++) {
+    for (uint8_t i = 0; i < zchg_STRAND_COUNT; i++) {
         uint8_t weight = lattice->my_strands[i].authority_weight;
         fp ^= ((uint32_t)weight << (i * 4));
     }
@@ -185,7 +185,7 @@ uint32_t hdgl_lattice_compute_fingerprint(hdgl_lattice_t *lattice) {
     return fp;
 }
 
-uint32_t hdgl_fingerprint_hamming_distance(uint32_t fp1, uint32_t fp2) {
+uint32_t zchg_fingerprint_hamming_distance(uint32_t fp1, uint32_t fp2) {
     uint32_t xor = fp1 ^ fp2;
     uint32_t distance = 0;
     while (xor) {
@@ -199,11 +199,11 @@ uint32_t hdgl_fingerprint_hamming_distance(uint32_t fp1, uint32_t fp2) {
  * PROVISIONER Pipeline
  * ============================================================================ */
 
-void hdgl_provisioner_norm(hdgl_lattice_t *lattice) {
+void zchg_provisioner_norm(zchg_lattice_t *lattice) {
     /* Normalize latencies to [0, 1] range */
     double min_latency = 999999.0, max_latency = 0.0;
 
-    for (uint8_t i = 0; i < HDGL_STRAND_COUNT; i++) {
+    for (uint8_t i = 0; i < zchg_STRAND_COUNT; i++) {
         double lat = lattice->my_strands[i].latency_ema;
         if (lat < min_latency) min_latency = lat;
         if (lat > max_latency) max_latency = lat;
@@ -211,51 +211,51 @@ void hdgl_provisioner_norm(hdgl_lattice_t *lattice) {
 
     if (max_latency <= min_latency) return;
 
-    for (uint8_t i = 0; i < HDGL_STRAND_COUNT; i++) {
+    for (uint8_t i = 0; i < zchg_STRAND_COUNT; i++) {
         double normalized = (lattice->my_strands[i].latency_ema - min_latency) / (max_latency - min_latency);
         lattice->my_strands[i].latency_ema = normalized;
     }
 }
 
-void hdgl_provisioner_scale(hdgl_lattice_t *lattice) {
+void zchg_provisioner_scale(zchg_lattice_t *lattice) {
     /* Apply phi-spiral amplification */
-    for (uint8_t i = 0; i < HDGL_STRAND_COUNT; i++) {
-        double amplified = hdgl_phi_amplify(lattice->my_strands[i].latency_ema);
+    for (uint8_t i = 0; i < zchg_STRAND_COUNT; i++) {
+        double amplified = zchg_phi_amplify(lattice->my_strands[i].latency_ema);
         lattice->my_strands[i].authority_weight = (uint8_t)(amplified * 100.0);
     }
 }
 
-void hdgl_provisioner_phaseshift(hdgl_lattice_t *lattice, uint64_t cycle) {
+void zchg_provisioner_phaseshift(zchg_lattice_t *lattice, uint64_t cycle) {
     /* Rotate strand authority based on cycle (round-robin effect) */
-    uint8_t shift = (cycle % HDGL_STRAND_COUNT);
+    uint8_t shift = (cycle % zchg_STRAND_COUNT);
     /* Shift can be applied here if needed for dynamic rebalancing */
     (void)shift;
 }
 
-void hdgl_provisioner_omegamult(hdgl_lattice_t *lattice) {
+void zchg_provisioner_omegamult(zchg_lattice_t *lattice) {
     /* Fibonacci-weighted stabilization */
-    for (uint8_t i = 0; i < HDGL_STRAND_COUNT; i++) {
-        double fib_factor = (i % 2 == 0) ? 1.0 : HDGL_FIBONACCI_SCALE;
+    for (uint8_t i = 0; i < zchg_STRAND_COUNT; i++) {
+        double fib_factor = (i % 2 == 0) ? 1.0 : zchg_FIBONACCI_SCALE;
         lattice->my_strands[i].authority_weight = (uint8_t)(lattice->my_strands[i].authority_weight * fib_factor);
     }
 }
 
-void hdgl_provisioner_energy(hdgl_lattice_t *lattice) {
+void zchg_provisioner_energy(zchg_lattice_t *lattice) {
     /* Energy is already computed as authority_weight */
 }
 
-void hdgl_provisioner_fold256(hdgl_lattice_t *lattice) {
+void zchg_provisioner_fold256(zchg_lattice_t *lattice) {
     /* Fold to 32-bit fingerprint */
-    hdgl_lattice_compute_fingerprint(lattice);
+    zchg_lattice_compute_fingerprint(lattice);
 }
 
-int hdgl_provisioner_run(hdgl_lattice_t *lattice, uint64_t cycle) {
-    hdgl_provisioner_norm(lattice);
-    hdgl_provisioner_scale(lattice);
-    hdgl_provisioner_phaseshift(lattice, cycle);
-    hdgl_provisioner_omegamult(lattice);
-    hdgl_provisioner_energy(lattice);
-    hdgl_provisioner_fold256(lattice);
+int zchg_provisioner_run(zchg_lattice_t *lattice, uint64_t cycle) {
+    zchg_provisioner_norm(lattice);
+    zchg_provisioner_scale(lattice);
+    zchg_provisioner_phaseshift(lattice, cycle);
+    zchg_provisioner_omegamult(lattice);
+    zchg_provisioner_energy(lattice);
+    zchg_provisioner_fold256(lattice);
     return 0;
 }
 
@@ -263,11 +263,11 @@ int hdgl_provisioner_run(hdgl_lattice_t *lattice, uint64_t cycle) {
  * My Strands (Authority Assignment)
  * ============================================================================ */
 
-int hdgl_lattice_compute_my_strands(hdgl_lattice_t *lattice, uint8_t *out_strands, uint8_t *out_count) {
+int zchg_lattice_compute_my_strands(zchg_lattice_t *lattice, uint8_t *out_strands, uint8_t *out_count) {
     uint8_t count = 0;
 
-    for (uint8_t i = 0; i < HDGL_STRAND_COUNT; i++) {
-        uint32_t authority = hdgl_lattice_get_strand_authority(lattice, i);
+    for (uint8_t i = 0; i < zchg_STRAND_COUNT; i++) {
+        uint32_t authority = zchg_lattice_get_strand_authority(lattice, i);
         if (authority == lattice->local_ip) {
             out_strands[count++] = i;
         }
@@ -281,15 +281,15 @@ int hdgl_lattice_compute_my_strands(hdgl_lattice_t *lattice, uint8_t *out_strand
  * Omega-TTL Model
  * ============================================================================ */
 
-uint32_t hdgl_compute_omega_ttl(uint8_t strand_id, uint64_t cycle) {
+uint32_t zchg_compute_omega_ttl(uint8_t strand_id, uint64_t cycle) {
     /* TTL_k = TTL_BASE * exp(-alpha_k * SPIRAL_PERIOD)
      * Contracting strands (alpha < 0) cache longer
      * Expanding strands (alpha > 0) refresh faster */
 
-    #define HDGL_TTL_BASE 3600  /* 1 hour */
+    #define zchg_TTL_BASE 3600  /* 1 hour */
 
     double alpha = -0.1 + (strand_id * 0.025);  /* Vary by strand */
-    double ttl = HDGL_TTL_BASE * exp(-alpha * HDGL_SPIRAL_PERIOD);
+    double ttl = zchg_TTL_BASE * exp(-alpha * zchg_SPIRAL_PERIOD);
 
     return (uint32_t)ttl;
 }

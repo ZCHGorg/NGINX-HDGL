@@ -1,4 +1,4 @@
-# HDGL v0.6 - Pure C Implementation Makefile
+# ZCHG v0.6 - Pure C Implementation Makefile
 #
 # Build targets:
 #   make build          - Compile HDGL daemon
@@ -19,24 +19,24 @@ BINDIR           = bin
 OBJDIR           = obj
 
 # Source files
-SOURCES         = $(SRCDIR)/hdgl_main.c \
-                  $(SRCDIR)/hdgl_lattice.c \
-				  $(SRCDIR)/hdgl_frame.c \
-				  $(SRCDIR)/hdgl_http.c \
-				  $(SRCDIR)/hdgl_transport.c \
-				  $(SRCDIR)/hdgl_gossip.c \
-				  $(SRCDIR)/hdgl_fileswap.c
+SOURCES         = $(SRCDIR)/zchg_main.c \
+                  $(SRCDIR)/zchg_lattice.c \
+				  $(SRCDIR)/zchg_frame.c \
+				  $(SRCDIR)/zchg_http.c \
+				  $(SRCDIR)/zchg_transport.c \
+				  $(SRCDIR)/zchg_gossip.c \
+				  $(SRCDIR)/zchg_fileswap.c
 
-HEADERS         = $(INCDIR)/hdgl_core.h \
-                  $(INCDIR)/hdgl_transport.h \
-                  $(INCDIR)/hdgl_lattice.h
+HEADERS         = $(INCDIR)/zchg_core.h \
+                  $(INCDIR)/zchg_transport.h \
+                  $(INCDIR)/zchg_lattice.h
 
 OBJECTS         = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
 # Targets
-TARGET_DAEMON   = $(BINDIR)/hdgl_daemon
-TARGET_TEST     = $(BINDIR)/hdgl_test
-TARGET_BENCH    = $(BINDIR)/hdgl_bench
+TARGET_DAEMON   = $(BINDIR)/zchg_daemon
+TARGET_TEST     = $(BINDIR)/zchg_test
+TARGET_BENCH    = $(BINDIR)/zchg_bench
 
 # ============================================================================
 # Build Rules
@@ -76,8 +76,8 @@ debug: clean build
 # Benchmark
 # ============================================================================
 
-bench: $(BINDIR) $(OBJDIR) $(SRCDIR)/hdgl_bench.c
-	$(CC) $(CFLAGS) -I$(INCDIR) -o $(TARGET_BENCH) $(SRCDIR)/hdgl_bench.c $(LDFLAGS)
+bench: $(BINDIR) $(OBJDIR) $(SRCDIR)/zchg_bench.c
+	$(CC) $(CFLAGS) -I$(INCDIR) -o $(TARGET_BENCH) $(SRCDIR)/zchg_bench.c $(LDFLAGS)
 	@echo "✓ Benchmark compiled: $(TARGET_BENCH)"
 
 # ============================================================================

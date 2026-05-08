@@ -1,5 +1,5 @@
 /*
- * hdgl_bench.c - HDGL v0.6 Performance Benchmark
+ * zchg_bench.c - ZCHG v0.6 Performance Benchmark
  * 
  * Measures:
  * - Throughput (req/sec)
@@ -8,9 +8,9 @@
  * - Connection pool efficiency
  * 
  * Usage:
- *   ./hdgl_bench <host> <port> [duration_sec] [concurrent_connections]
+ *   ./zchg_bench <host> <port> [duration_sec] [concurrent_connections]
  * Example:
- *   ./hdgl_bench 127.0.0.1 8090 30 1000
+ *   ./zchg_bench 127.0.0.1 8090 30 1000
  */
 
 #include <stdio.h>
@@ -211,7 +211,7 @@ static int bench_run(const char *host, uint16_t port, int duration_sec, int conc
         return -1;
     }
     
-    fprintf(stdout, "HDGL v0.6 Benchmark\n");
+    fprintf(stdout, "ZCHG v0.6 Benchmark\n");
     fprintf(stdout, "Target: %s:%d\n", host, port);
     fprintf(stdout, "Duration: %d sec\n", duration_sec);
     fprintf(stdout, "Concurrent: %d\n", concurrent);

@@ -1,5 +1,5 @@
 /*
- * hdgl_gossip.c — Binary gossip protocol for cluster convergence
+ * zchg_gossip.c — Binary gossip protocol for cluster convergence
  * 
  * Implements lightweight peer-to-peer cluster updates via:
  * - Deterministic peer selection (phi-spiral ordering)
@@ -14,15 +14,15 @@
 #include <time.h>
 #include <arpa/inet.h>
 
-#include "../include/hdgl_core.h"
-#include "../include/hdgl_lattice.h"
-#include "../include/hdgl_transport.h"
+#include "../include/zchg_core.h"
+#include "../include/zchg_lattice.h"
+#include "../include/zchg_transport.h"
 
 /*
  * Select N random peers for gossip broadcast using phi-spiral ordering.
  * Deterministic but pseudo-random via cycle-based seeding.
  */
-static int hdgl_gossip_select_peers(const hdgl_lattice_t *lattice,
+static int zchg_gossip_select_peers(const zchg_lattice_t *lattice,
                                      uint32_t *out_peers,
                                      int max_peers) {
     if (!lattice || lattice->peer_count == 0) {
@@ -35,7 +35,7 @@ static int hdgl_gossip_select_peers(const hdgl_lattice_t *lattice,
     /* Select up to 3 peers using phi-spiral order */
     int peers_to_select = (lattice->peer_count < 3) ? lattice->peer_count : 3;
     for (int i = 0; i < peers_to_select && peer_idx < max_peers; i++) {
-        uint32_t offset = (uint32_t)((seed * HDGL_PHI_NUMERATOR / HDGL_PHI_DENOMINATOR) + i) % lattice->peer_count;
+        uint32_t offset = (uint32_t)((seed * zchg_PHI_NUMERATOR / zchg_PHI_DENOMINATOR) + i) % lattice->peer_count;
         if (lattice->peers[offset] != 0) {
             out_peers[peer_idx++] = lattice->peers[offset];
         }
@@ -48,8 +48,8 @@ static int hdgl_gossip_select_peers(const hdgl_lattice_t *lattice,
  * Generate a gossip message from current lattice state.
  * Compacts cycle number, fingerprint, and peer count into ~16 bytes.
  */
-void hdgl_gossip_create_message(const hdgl_lattice_t *lattice,
-                                 hdgl_gossip_msg_t *out_msg) {
+void zchg_gossip_create_message(const zchg_lattice_t *lattice,
+                                 zchg_gossip_msg_t *out_msg) {
     memset(out_msg, 0, sizeof(*out_msg));
     
     out_msg->source_ip = lattice->my_ip;
@@ -66,9 +66,9 @@ void hdgl_gossip_create_message(const hdgl_lattice_t *lattice,
 /*
  * Apply gossip-driven lattice update: merge peer state with local view.
  */
-int hdgl_lattice_apply_gossip(hdgl_lattice_t *lattice,
+int zchg_lattice_apply_gossip(zchg_lattice_t *lattice,
                                uint32_t peer_ip,
-                               hdgl_gossip_msg_t *msg) {
+                               zchg_gossip_msg_t *msg) {
     if (!lattice || !msg) {
         return -1;
     }
@@ -115,14 +115,14 @@ int hdgl_lattice_apply_gossip(hdgl_lattice_t *lattice,
  * Broadcast gossip message to selected peers via transport layer.
  * Non-blocking; failures are tolerated and retried on next cycle.
  */
-int hdgl_gossip_broadcast(hdgl_transport_server_t *server,
-                          const hdgl_gossip_msg_t *msg) {
+int zchg_gossip_broadcast(zchg_transport_server_t *server,
+                          const zchg_gossip_msg_t *msg) {
     if (!server || !msg) {
         return -1;
     }
 
     uint32_t peers[3];
-    int peer_count = hdgl_gossip_select_peers(&server->lattice, peers, 3);
+    int peer_count = zchg_gossip_select_peers(&server->lattice, peers, 3);
     
     if (peer_count <= 0) {
         return 0;  /* No peers to gossip to; not an error */
@@ -136,9 +136,9 @@ int hdgl_gossip_broadcast(hdgl_transport_server_t *server,
         }
 
         /* Create a gossip frame and send via peer transport */
-        hdgl_frame_t frame;
+        zchg_frame_t frame;
         memset(&frame, 0, sizeof(frame));
-        frame.frame_type = HDGL_FRAME_GOSSIP;
+        frame.frame_type = zchg_FRAME_GOSSIP;
         frame.source_ip = server->local_ip;
         frame.source_strand = server->lattice.my_strand;
         frame.payload_len = sizeof(*msg);
@@ -148,7 +148,7 @@ int hdgl_gossip_broadcast(hdgl_transport_server_t *server,
             memcpy(frame.payload, msg, sizeof(*msg));
             
             /* Send to peer; transport layer handles connection pooling */
-            hdgl_client_send_frame(server, peer_ip, &frame);
+            zchg_client_send_frame(server, peer_ip, &frame);
             
             free(frame.payload);
             server->lattice.last_gossip_out = time(NULL);
@@ -160,24 +160,24 @@ int hdgl_gossip_broadcast(hdgl_transport_server_t *server,
 
 /*
  * Periodic gossip cycle: generate and broadcast state to cluster.
- * Called by main event loop at HDGL_GOSSIP_INTERVAL seconds.
+ * Called by main event loop at zchg_GOSSIP_INTERVAL seconds.
  */
-int hdgl_gossip_cycle(hdgl_transport_server_t *server) {
+int zchg_gossip_cycle(zchg_transport_server_t *server) {
     if (!server) {
         return -1;
     }
 
-    hdgl_gossip_msg_t msg;
-    hdgl_gossip_create_message(&server->lattice, &msg);
+    zchg_gossip_msg_t msg;
+    zchg_gossip_create_message(&server->lattice, &msg);
     
-    return hdgl_gossip_broadcast(server, &msg);
+    return zchg_gossip_broadcast(server, &msg);
 }
 
 /*
  * Health check: detect and evict unresponsive peers.
  * Runs after gossip cycle.
  */
-int hdgl_gossip_evict_dead_peers(hdgl_lattice_t *lattice) {
+int zchg_gossip_evict_dead_peers(zchg_lattice_t *lattice) {
     if (!lattice) {
         return -1;
     }

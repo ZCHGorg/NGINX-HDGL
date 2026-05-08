@@ -1,14 +1,14 @@
 /*
- * hdgl_frame.c - Binary Frame Serialization & Deserialization
+ * zchg_frame.c - Binary Frame Serialization & Deserialization
  *
- * HDGL frame format: 52-byte header + payload
+ * ZCHG frame format: 52-byte header + payload
  * - Version + Type + Strand ID + Reserved
  * - Authority endpoint + Source IP + Payload length + Timestamp
  * - HMAC-SHA256 signature (20 bytes in header + validation)
  * - Binary encoding for performance (83% reduction vs JSON)
  */
 
-#include "hdgl_core.h"
+#include "zchg_core.h"
 #include <string.h>
 #include <stdio.h>
 #include <arpa/inet.h>
@@ -17,21 +17,21 @@
  * Frame Serialization
  * ============================================================================ */
 
-int hdgl_frame_serialize(hdgl_frame_t *frame, uint8_t **out_buf, size_t *out_len) {
+int zchg_frame_serialize(zchg_frame_t *frame, uint8_t **out_buf, size_t *out_len) {
     if (!frame || !out_buf || !out_len) return -1;
 
     /* Total size: header + payload */
-    size_t total_size = HDGL_FRAME_HEADER_SIZE + frame->payload_len;
+    size_t total_size = zchg_FRAME_HEADER_SIZE + frame->payload_len;
 
     uint8_t *buf = (uint8_t *)malloc(total_size);
     if (!buf) return -1;
 
     /* Copy header (already packed) */
-    memcpy(buf, &frame->header, HDGL_FRAME_HEADER_SIZE);
+    memcpy(buf, &frame->header, zchg_FRAME_HEADER_SIZE);
 
     /* Copy payload */
     if (frame->payload && frame->payload_len > 0) {
-        memcpy(buf + HDGL_FRAME_HEADER_SIZE, frame->payload, frame->payload_len);
+        memcpy(buf + zchg_FRAME_HEADER_SIZE, frame->payload, frame->payload_len);
     }
 
     *out_buf = buf;
@@ -40,22 +40,22 @@ int hdgl_frame_serialize(hdgl_frame_t *frame, uint8_t **out_buf, size_t *out_len
     return 0;
 }
 
-int hdgl_frame_deserialize(uint8_t *buf, size_t len, hdgl_frame_t *out_frame) {
-    if (!buf || len < HDGL_FRAME_HEADER_SIZE || !out_frame) return -1;
+int zchg_frame_deserialize(uint8_t *buf, size_t len, zchg_frame_t *out_frame) {
+    if (!buf || len < zchg_FRAME_HEADER_SIZE || !out_frame) return -1;
 
     /* Copy header */
-    memcpy(&out_frame->header, buf, HDGL_FRAME_HEADER_SIZE);
+    memcpy(&out_frame->header, buf, zchg_FRAME_HEADER_SIZE);
 
     /* Validate payload length */
-    if (out_frame->header.payload_len > HDGL_FRAME_MAX_PAYLOAD) return -1;
-    if (HDGL_FRAME_HEADER_SIZE + out_frame->header.payload_len != len) return -1;
+    if (out_frame->header.payload_len > zchg_FRAME_MAX_PAYLOAD) return -1;
+    if (zchg_FRAME_HEADER_SIZE + out_frame->header.payload_len != len) return -1;
 
     /* Allocate and copy payload */
     if (out_frame->header.payload_len > 0) {
         out_frame->payload = (uint8_t *)malloc(out_frame->header.payload_len);
         if (!out_frame->payload) return -1;
 
-        memcpy(out_frame->payload, buf + HDGL_FRAME_HEADER_SIZE, out_frame->header.payload_len);
+        memcpy(out_frame->payload, buf + zchg_FRAME_HEADER_SIZE, out_frame->header.payload_len);
     } else {
         out_frame->payload = NULL;
     }
@@ -70,11 +70,11 @@ int hdgl_frame_deserialize(uint8_t *buf, size_t len, hdgl_frame_t *out_frame) {
  * Frame Pool (Object Reuse)
  * ============================================================================ */
 
-hdgl_frame_t* hdgl_frame_alloc(hdgl_frame_pool_t *pool) {
+zchg_frame_t* zchg_frame_alloc(zchg_frame_pool_t *pool) {
     if (!pool) return NULL;
 
     /* Find available frame in pool */
-    for (uint32_t i = 0; i < HDGL_FRAME_POOL_SIZE; i++) {
+    for (uint32_t i = 0; i < zchg_FRAME_POOL_SIZE; i++) {
         if (!pool->in_use[i]) {
             pool->in_use[i] = 1;
             pool->reused_count++;
@@ -86,11 +86,11 @@ hdgl_frame_t* hdgl_frame_alloc(hdgl_frame_pool_t *pool) {
     return NULL;
 }
 
-void hdgl_frame_free(hdgl_frame_pool_t *pool, hdgl_frame_t *frame) {
+void zchg_frame_free(zchg_frame_pool_t *pool, zchg_frame_t *frame) {
     if (!pool || !frame) return;
 
     /* Find frame in pool */
-    for (uint32_t i = 0; i < HDGL_FRAME_POOL_SIZE; i++) {
+    for (uint32_t i = 0; i < zchg_FRAME_POOL_SIZE; i++) {
         if (&pool->frames[i] == frame) {
             pool->in_use[i] = 0;
             /* Clear payload if allocated */
@@ -111,7 +111,7 @@ void hdgl_frame_free(hdgl_frame_pool_t *pool, hdgl_frame_t *frame) {
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
 
-int hdgl_hmac_sign_frame(hdgl_frame_t *frame, const char *secret, size_t secret_len) {
+int zchg_hmac_sign_frame(zchg_frame_t *frame, const char *secret, size_t secret_len) {
     if (!frame || !secret || secret_len == 0) return -1;
 
     /* Create HMAC over header (minus signature) + payload */
@@ -125,7 +125,7 @@ int hdgl_hmac_sign_frame(hdgl_frame_t *frame, const char *secret, size_t secret_
 
     /* Hash header fields (skip HMAC field itself) */
     HMAC_Update(ctx, (unsigned char *)&frame->header,
-                offsetof(hdgl_frame_header_t, hmac));
+                offsetof(zchg_frame_header_t, hmac));
 
     /* Hash payload */
     if (frame->payload && frame->payload_len > 0) {
@@ -142,17 +142,17 @@ int hdgl_hmac_sign_frame(hdgl_frame_t *frame, const char *secret, size_t secret_
     return 0;
 }
 
-int hdgl_hmac_verify_frame(hdgl_frame_t *frame, const char *secret, size_t secret_len) {
+int zchg_hmac_verify_frame(zchg_frame_t *frame, const char *secret, size_t secret_len) {
     if (!frame || !secret || secret_len == 0) return -1;
 
     uint8_t expected_hmac[20];
     memcpy(expected_hmac, frame->header.hmac, 20);
 
     /* Re-sign to get expected HMAC */
-    hdgl_frame_t test_frame = *frame;
+    zchg_frame_t test_frame = *frame;
     memset(test_frame.header.hmac, 0, 20);
 
-    if (hdgl_hmac_sign_frame(&test_frame, secret, secret_len) != 0) {
+    if (zchg_hmac_sign_frame(&test_frame, secret, secret_len) != 0) {
         return -1;
     }
 
@@ -164,11 +164,11 @@ int hdgl_hmac_verify_frame(hdgl_frame_t *frame, const char *secret, size_t secre
  * Timestamp Validation (Replay Protection)
  * ============================================================================ */
 
-int hdgl_timestamp_is_valid(uint64_t timestamp) {
+int zchg_timestamp_is_valid(uint64_t timestamp) {
     uint64_t now = (uint64_t)time(NULL) * 1000;  /* Convert to milliseconds */
     int64_t diff = (int64_t)(now - timestamp);
 
     /* Accept timestamps within ±30 seconds */
     if (diff < 0) diff = -diff;
-    return (diff <= HDGL_REPLAY_WINDOW_SEC * 1000) ? 1 : 0;
+    return (diff <= zchg_REPLAY_WINDOW_SEC * 1000) ? 1 : 0;
 }

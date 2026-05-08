@@ -1,7 +1,7 @@
 /*
- * hdgl_fileswap.c — Strand-addressed distributed filesystem
+ * zchg_fileswap.c — Strand-addressed distributed filesystem
  * 
- * Implements HDGL fileswap distribution:
+ * Implements ZCHG fileswap distribution:
  * - Strand-based routing (file hash → strand authority)
  * - Distributed caching with LRU eviction
  * - Authority shift-driven file migration
@@ -16,15 +16,15 @@
 #include <time.h>
 #include <sys/types.h>
 
-#include "../include/hdgl_core.h"
-#include "../include/hdgl_lattice.h"
-#include "../include/hdgl_transport.h"
+#include "../include/zchg_core.h"
+#include "../include/zchg_lattice.h"
+#include "../include/zchg_transport.h"
 
 /*
  * Compute which strand owns a file based on path hash.
  * Uses phi-tau deterministic routing.
  */
-static uint8_t hdgl_fileswap_hash_to_strand(const char *path) {
+static uint8_t zchg_fileswap_hash_to_strand(const char *path) {
     uint32_t hash = 0;
     const unsigned char *p = (const unsigned char *)path;
     
@@ -36,28 +36,28 @@ static uint8_t hdgl_fileswap_hash_to_strand(const char *path) {
     }
 
     /* Map hash to strand using phi-tau */
-    return (uint8_t)((hash * 8) / (UINT32_MAX / HDGL_STRAND_COUNT + 1)) % HDGL_STRAND_COUNT;
+    return (uint8_t)((hash * 8) / (UINT32_MAX / zchg_STRAND_COUNT + 1)) % zchg_STRAND_COUNT;
 }
 
 /*
  * Compute fileswap path on local filesystem for a given strand-addressed file.
  */
-static void hdgl_fileswap_local_path(const char *logical_path,
+static void zchg_fileswap_local_path(const char *logical_path,
                                       char *out_local_path,
                                       size_t out_len) {
     snprintf(out_local_path, out_len, "%s/%s",
-             HDGL_FILESWAP_ROOT, logical_path);
+             zchg_FILESWAP_ROOT, logical_path);
 }
 
 /*
  * Allocate file space from fileswap budget (LRU eviction if necessary).
  * Returns 1 if space allocated, 0 if eviction needed, -1 on error.
  */
-static int hdgl_fileswap_ensure_space(size_t needed_bytes) {
+static int zchg_fileswap_ensure_space(size_t needed_bytes) {
     struct stat st;
     
     /* Check if fileswap root exists */
-    if (stat(HDGL_FILESWAP_ROOT, &st) != 0) {
+    if (stat(zchg_FILESWAP_ROOT, &st) != 0) {
         return -1;
     }
 
@@ -70,7 +70,7 @@ static int hdgl_fileswap_ensure_space(size_t needed_bytes) {
  * Store a file in fileswap cache.
  * File is placed in the cache directory and tracked for authority.
  */
-int hdgl_fileswap_store(hdgl_transport_server_t *server,
+int zchg_fileswap_store(zchg_transport_server_t *server,
                         const char *logical_path,
                         const uint8_t *data,
                         size_t data_len) {
@@ -78,11 +78,11 @@ int hdgl_fileswap_store(hdgl_transport_server_t *server,
         return -1;
     }
 
-    uint8_t target_strand = hdgl_fileswap_hash_to_strand(logical_path);
-    uint32_t authority = hdgl_lattice_get_strand_authority(&server->lattice, target_strand);
+    uint8_t target_strand = zchg_fileswap_hash_to_strand(logical_path);
+    uint32_t authority = zchg_lattice_get_strand_authority(&server->lattice, target_strand);
     
     char local_path[2048];
-    hdgl_fileswap_local_path(logical_path, local_path, sizeof(local_path));
+    zchg_fileswap_local_path(logical_path, local_path, sizeof(local_path));
     
     /* Check if we have local authority or are a mirror */
     int is_authority = (authority == server->local_ip);
@@ -94,7 +94,7 @@ int hdgl_fileswap_store(hdgl_transport_server_t *server,
     }
 
     /* Ensure space in fileswap budget */
-    if (hdgl_fileswap_ensure_space(data_len) != 1) {
+    if (zchg_fileswap_ensure_space(data_len) != 1) {
         return -1;  /* No space after eviction */
     }
 
@@ -132,7 +132,7 @@ int hdgl_fileswap_store(hdgl_transport_server_t *server,
  * Retrieve a file from fileswap cache.
  * If not cached locally, fetch from authority strand.
  */
-int hdgl_fileswap_fetch(hdgl_transport_server_t *server,
+int zchg_fileswap_fetch(zchg_transport_server_t *server,
                         const char *logical_path,
                         uint8_t **out_data,
                         size_t *out_len) {
@@ -141,7 +141,7 @@ int hdgl_fileswap_fetch(hdgl_transport_server_t *server,
     }
 
     char local_path[2048];
-    hdgl_fileswap_local_path(logical_path, local_path, sizeof(local_path));
+    zchg_fileswap_local_path(logical_path, local_path, sizeof(local_path));
     
     struct stat st;
     if (stat(local_path, &st) == 0 && S_ISREG(st.st_mode)) {
@@ -182,7 +182,7 @@ int hdgl_fileswap_fetch(hdgl_transport_server_t *server,
  * Migrate file to new authority when strand authority changes.
  * Triggered by gossip-driven PROVISIONER updates.
  */
-int hdgl_fileswap_migrate_on_authority_shift(hdgl_transport_server_t *server,
+int zchg_fileswap_migrate_on_authority_shift(zchg_transport_server_t *server,
                                               uint8_t strand,
                                               uint32_t new_authority) {
     if (!server || new_authority == 0) {
@@ -190,7 +190,7 @@ int hdgl_fileswap_migrate_on_authority_shift(hdgl_transport_server_t *server,
     }
 
     /* Placeholder: scan fileswap for files assigned to this strand */
-    /* and migrate them to new authority via hdgl_client_send_frame */
+    /* and migrate them to new authority via zchg_client_send_frame */
     
     return 0;
 }
@@ -199,7 +199,7 @@ int hdgl_fileswap_migrate_on_authority_shift(hdgl_transport_server_t *server,
  * Evict expired or oversized files from fileswap (LRU policy).
  * Called periodically by main event loop.
  */
-int hdgl_fileswap_evict_lru(hdgl_transport_server_t *server,
+int zchg_fileswap_evict_lru(zchg_transport_server_t *server,
                              size_t target_free_bytes) {
     if (!server) {
         return -1;
@@ -214,7 +214,7 @@ int hdgl_fileswap_evict_lru(hdgl_transport_server_t *server,
  * Capture file as passive mirror when we observe authority.
  * Called after gossip cycle to keep mirrors fresh.
  */
-int hdgl_fileswap_capture_as_mirror(hdgl_transport_server_t *server,
+int zchg_fileswap_capture_as_mirror(zchg_transport_server_t *server,
                                      uint8_t strand,
                                      uint32_t authority) {
     if (!server || authority == 0) {
@@ -233,7 +233,7 @@ int hdgl_fileswap_capture_as_mirror(hdgl_transport_server_t *server,
 /*
  * Report fileswap statistics (cache hit ratio, size).
  */
-int hdgl_fileswap_stats(const char *fileswap_root,
+int zchg_fileswap_stats(const char *fileswap_root,
                         size_t *out_total_bytes,
                         uint32_t *out_file_count) {
     if (!fileswap_root) {

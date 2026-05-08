@@ -1,5 +1,5 @@
 /*
- * hdgl_main.c - HDGL v0.6 Main Entry Point
+ * zchg_main.c - ZCHG v0.6 Main Entry Point
  *
  * Pure C daemon with:
  * - Async I/O transport (50K+ → 200K+ req/sec)
@@ -19,31 +19,31 @@
 #include <arpa/inet.h>
 #include <time.h>
 
-#include "hdgl_core.h"
-#include "hdgl_transport.h"
-#include "hdgl_lattice.h"
+#include "zchg_core.h"
+#include "zchg_transport.h"
+#include "zchg_lattice.h"
 
 /* Global server instance (for signal handlers) */
-static hdgl_transport_server_t *g_server = NULL;
-static hdgl_event_loop_t *g_loop = NULL;
+static zchg_transport_server_t *g_server = NULL;
+static zchg_event_loop_t *g_loop = NULL;
 static volatile int g_running = 1;
 
 /* ============================================================================
  * Signal Handlers
  * ============================================================================ */
 
-void hdgl_handle_sigterm(int sig) {
+void zchg_handle_sigterm(int sig) {
     (void)sig;
-    fprintf(stderr, "[hdgl] SIGTERM received, shutting down...\n");
+    fprintf(stderr, "[ZCHG] SIGTERM received, shutting down...\n");
     g_running = 0;
     if (g_loop) {
-        hdgl_event_loop_break(g_loop);
+        zchg_event_loop_break(g_loop);
     }
 }
 
-void hdgl_handle_sighup(int sig) {
+void zchg_handle_sighup(int sig) {
     (void)sig;
-    fprintf(stderr, "[hdgl] SIGHUP received, reloading config...\n");
+    fprintf(stderr, "[ZCHG] SIGHUP received, reloading config...\n");
     /* Config reload logic would go here */
 }
 
@@ -51,7 +51,7 @@ void hdgl_handle_sighup(int sig) {
  * Configuration Loading
  * ============================================================================ */
 
-int hdgl_load_config(hdgl_config_t *cfg) {
+int zchg_load_config(zchg_config_t *cfg) {
     /* Load from environment variables */
     const char *local_node = getenv("LN_LOCAL_NODE");
     const char *cluster_secret = getenv("LN_CLUSTER_SECRET");
@@ -78,35 +78,35 @@ int hdgl_load_config(hdgl_config_t *cfg) {
  * Initialization
  * ============================================================================ */
 
-int hdgl_init() {
+int zchg_init() {
     /* Load configuration */
-    hdgl_config_t config;
+    zchg_config_t config;
     memset(&config, 0, sizeof(config));
 
-    if (hdgl_load_config(&config) != 0) {
+    if (zchg_load_config(&config) != 0) {
         return -1;
     }
 
     /* Create server */
-    g_server = hdgl_server_create(&config);
+    g_server = zchg_server_create(&config);
     if (!g_server) {
         fprintf(stderr, "Error: Failed to create server\n");
         return -1;
     }
 
     /* Create event loop */
-    g_loop = hdgl_event_loop_create();
+    g_loop = zchg_event_loop_create();
     if (!g_loop) {
         fprintf(stderr, "Error: Failed to create event loop\n");
-        hdgl_server_destroy(g_server);
+        zchg_server_destroy(g_server);
         return -1;
     }
 
     /* Start listening */
-    if (hdgl_server_listen(g_server, g_loop) != 0) {
+    if (zchg_server_listen(g_server, g_loop) != 0) {
         fprintf(stderr, "Error: Failed to start listening\n");
-        hdgl_event_loop_destroy(g_loop);
-        hdgl_server_destroy(g_server);
+        zchg_event_loop_destroy(g_loop);
+        zchg_server_destroy(g_server);
         return -1;
     }
 
@@ -122,15 +122,15 @@ int main(int argc, char *argv[]) {
     (void)argv;
 
     /* Install signal handlers */
-    signal(SIGTERM, hdgl_handle_sigterm);
-    signal(SIGINT, hdgl_handle_sigterm);
-    signal(SIGHUP, hdgl_handle_sighup);
+    signal(SIGTERM, zchg_handle_sigterm);
+    signal(SIGINT, zchg_handle_sigterm);
+    signal(SIGHUP, zchg_handle_sighup);
 
-    printf("HDGL v0.6 - Pure C High-Performance Living Network\n");
+    printf("ZCHG v0.6 - Pure C High-Performance Living Network\n");
     printf("Initializing...\n");
 
     /* Initialize */
-    if (hdgl_init() != 0) {
+    if (zchg_init() != 0) {
         fprintf(stderr, "Error: Initialization failed\n");
         return 1;
     }
@@ -145,14 +145,14 @@ int main(int argc, char *argv[]) {
     printf("Waiting for connections...\n");
 
     /* Run event loop */
-    if (hdgl_event_loop_run(g_loop) != 0) {
+    if (zchg_event_loop_run(g_loop) != 0) {
         fprintf(stderr, "Error: Event loop failed\n");
     }
 
     /* Cleanup */
     printf("\nShutting down...\n");
-    hdgl_event_loop_destroy(g_loop);
-    hdgl_server_destroy(g_server);
+    zchg_event_loop_destroy(g_loop);
+    zchg_server_destroy(g_server);
 
     printf("Goodbye.\n");
     return 0;
@@ -163,8 +163,8 @@ int main(int argc, char *argv[]) {
  * ============================================================================ */
 
 /* Server creation stub */
-hdgl_transport_server_t* hdgl_server_create(hdgl_config_t *cfg) {
-    hdgl_transport_server_t *server = (hdgl_transport_server_t *)malloc(sizeof(*server));
+zchg_transport_server_t* zchg_server_create(zchg_config_t *cfg) {
+    zchg_transport_server_t *server = (zchg_transport_server_t *)malloc(sizeof(*server));
     if (!server) return NULL;
 
     memset(server, 0, sizeof(*server));
@@ -179,7 +179,7 @@ hdgl_transport_server_t* hdgl_server_create(hdgl_config_t *cfg) {
     server->lattice.port = server->port;
     server->started_at = time(NULL);
 
-    for (uint8_t strand = 0; strand < HDGL_STRAND_COUNT; strand++) {
+    for (uint8_t strand = 0; strand < zchg_STRAND_COUNT; strand++) {
         server->lattice.my_strands[strand].strand_id = strand;
         server->lattice.my_strands[strand].authority_weight = 1;
         server->lattice.my_strands[strand].latency_ema = 50.0;
@@ -188,7 +188,7 @@ hdgl_transport_server_t* hdgl_server_create(hdgl_config_t *cfg) {
     return server;
 }
 
-void hdgl_server_destroy(hdgl_transport_server_t *server) {
+void zchg_server_destroy(zchg_transport_server_t *server) {
     if (server) {
         free(server);
     }
