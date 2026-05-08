@@ -38,8 +38,8 @@ v0.6-c/
 │   ├── hdgl_frame.c        - Frame serialization, frame pool, HMAC signing
 │   ├── hdgl_http.c         - Native HTTP front door, request routing, native HDGL endpoints
 │   ├── hdgl_transport.c    - Peer transport, connection pooling, HTTP forwarding
-│   ├── hdgl_gossip.c       - Binary gossip protocol [TODO]
-│   └── hdgl_fileswap.c     - Distributed file system [TODO]
+│   ├── hdgl_gossip.c       - Binary gossip protocol, cluster convergence
+│   └── hdgl_fileswap.c     - Distributed filesystem, strand-addressed routing
 ├── Makefile                - Build automation (gcc, -O3, native optimizations)
 └── README.md               - This file
 ```
@@ -62,17 +62,19 @@ v0.6-c/
 - ✓ /serve/* path serving from HDGL fileswap root
 - ✓ POST /frame and POST /gossip handlers
 
-**Phase 3: Gossip & Clustering (PLANNED)**
-- [ ] Binary gossip protocol (16 bytes per message)
-- [ ] Peer discovery and health checks
-- [ ] Lattice updates from gossip
-- [ ] Cluster fingerprint convergence
+**Phase 3: Gossip & Clustering (COMPLETE ✓)**
+- ✓ Binary gossip protocol (16 bytes per message)
+- ✓ Phi-spiral peer selection for broadcast
+- ✓ EMA-based cluster fingerprint convergence
+- ✓ Dead peer detection and eviction
+- ✓ Cycle-aware gossip dispersion
 
-**Phase 4: Fileswap (PLANNED)**
-- [ ] Strand-addressed file routing
-- [ ] Distributed cache with LRU eviction
-- [ ] File migration on authority shift
-- [ ] Passive mirror capture
+**Phase 4: Fileswap Distribution (COMPLETE ✓)**
+- ✓ Strand-addressed file routing (phi-tau hash)
+- ✓ Distributed cache with LRU eviction API
+- ✓ Authority shift-driven file migration
+- ✓ Passive mirror capture on gossip cycles
+- ✓ Per-strand fileswap statistics
 
 ---
 

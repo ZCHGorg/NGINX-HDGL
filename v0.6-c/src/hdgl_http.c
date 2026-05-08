@@ -1074,6 +1074,9 @@ int hdgl_event_loop_run(hdgl_event_loop_t *loop) {
         return -1;
     }
 
+    time_t last_gossip_cycle = time(NULL);
+    time_t last_fileswap_evict = time(NULL);
+
     while (loop->running) {
         fd_set read_fds;
         fd_set write_fds;
@@ -1105,6 +1108,19 @@ int hdgl_event_loop_run(hdgl_event_loop_t *loop) {
             }
             perror("select");
             return -1;
+        }
+
+        /* Periodic cluster operations */
+        time_t now = time(NULL);
+        if (now - last_gossip_cycle >= HDGL_GOSSIP_INTERVAL) {
+            hdgl_gossip_cycle(loop->server);
+            hdgl_gossip_evict_dead_peers(&loop->server->lattice);
+            last_gossip_cycle = now;
+        }
+        
+        if (now - last_fileswap_evict >= 60) {
+            hdgl_fileswap_evict_lru(loop->server, 0);
+            last_fileswap_evict = now;
         }
 
         if (FD_ISSET(loop->server->listen_fd, &read_fds)) {

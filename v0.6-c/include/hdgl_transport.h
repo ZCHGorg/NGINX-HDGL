@@ -131,4 +131,47 @@ int hdgl_metrics_collect(hdgl_transport_server_t *server, hdgl_metrics_t *out_me
 
 int hdgl_timestamp_is_valid(uint64_t timestamp);
 
+/* ============================================================================
+ * Gossip Protocol (Cluster Convergence)
+ * ============================================================================ */
+
+/* Create gossip message from lattice state */
+void hdgl_gossip_create_message(const hdgl_lattice_t *lattice, hdgl_gossip_msg_t *out_msg);
+
+/* Broadcast gossip to selected peers */
+int hdgl_gossip_broadcast(hdgl_transport_server_t *server, const hdgl_gossip_msg_t *msg);
+
+/* Run gossip cycle (generation + broadcast) */
+int hdgl_gossip_cycle(hdgl_transport_server_t *server);
+
+/* Evict unresponsive peers after gossip cycle */
+int hdgl_gossip_evict_dead_peers(hdgl_lattice_t *lattice);
+
+/* ============================================================================
+ * Fileswap (Distributed Filesystem)
+ * ============================================================================ */
+
+/* Store file in fileswap cache */
+int hdgl_fileswap_store(hdgl_transport_server_t *server, const char *logical_path,
+                       const uint8_t *data, size_t data_len);
+
+/* Fetch file from fileswap (local or remote) */
+int hdgl_fileswap_fetch(hdgl_transport_server_t *server, const char *logical_path,
+                       uint8_t **out_data, size_t *out_len);
+
+/* Migrate files when strand authority changes */
+int hdgl_fileswap_migrate_on_authority_shift(hdgl_transport_server_t *server,
+                                             uint8_t strand, uint32_t new_authority);
+
+/* Evict old files (LRU) */
+int hdgl_fileswap_evict_lru(hdgl_transport_server_t *server, size_t target_free_bytes);
+
+/* Capture files as passive mirror */
+int hdgl_fileswap_capture_as_mirror(hdgl_transport_server_t *server,
+                                    uint8_t strand, uint32_t authority);
+
+/* Report fileswap statistics */
+int hdgl_fileswap_stats(const char *fileswap_root, size_t *out_total_bytes,
+                       uint32_t *out_file_count);
+
 #endif /* HDGL_TRANSPORT_H */

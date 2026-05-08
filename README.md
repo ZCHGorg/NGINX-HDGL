@@ -13,11 +13,11 @@
 
 ## What's Next: v0.6-c (Pure C Implementation)
 
-**v0.6 Development Status**: Native HTTP Front Door + Peer Transport Implemented ✓
+**v0.6 Development Status**: Native HTTP Front Door + Peer Transport + Gossip + Fileswap ✓
 
-HDGL v0.6-c represents the next generation: **pure C implementation** with a native HDGL:// front door for direct NGINX replacement.
+HDGL v0.6-c represents the next generation: **pure C implementation** with a native HDGL:// front door, cluster gossip, and strand-addressed fileswap for direct NGINX replacement.
 
-The protocol exposes a self-describing discovery surface at `/protocol` and `/.well-known/hdgl`, so HDGL can advertise its edge, peer, fileswap, and gossip behavior directly over HDGL://.
+The protocol exposes a self-describing discovery surface at `/protocol` and `/.well-known/hdgl`, so HDGL can advertise its edge, peer, gossip, and fileswap behavior directly over HDGL://.
 
 ### v0.6 Goals
 
@@ -29,6 +29,8 @@ The protocol exposes a self-describing discovery surface at `/protocol` and `/.w
 - **Easy button maintained**: Single `deploy_hdgl.sh` entry point, same config model
 - **Native HDGL:// front door**: `hdgl://` scheme plus `/protocol`, `/health`, `/metrics`, `/node_info`, `/strand_map`, `/serve/*`, `POST /frame`, `POST /gossip`
 - **Peer transport**: Pooled HTTP frame forwarding to peers without NGINX
+- **Cluster gossip**: Binary protocol (~16 bytes) with phi-spiral peer selection and EMA convergence
+- **Fileswap distribution**: Strand-addressed routing, LRU eviction, authority-shift migration, passive mirrors
 
 ### v0.6 Architecture
 

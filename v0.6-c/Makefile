@@ -23,7 +23,9 @@ SOURCES         = $(SRCDIR)/hdgl_main.c \
                   $(SRCDIR)/hdgl_lattice.c \
 				  $(SRCDIR)/hdgl_frame.c \
 				  $(SRCDIR)/hdgl_http.c \
-				  $(SRCDIR)/hdgl_transport.c
+				  $(SRCDIR)/hdgl_transport.c \
+				  $(SRCDIR)/hdgl_gossip.c \
+				  $(SRCDIR)/hdgl_fileswap.c
 
 HEADERS         = $(INCDIR)/hdgl_core.h \
                   $(INCDIR)/hdgl_transport.h \
