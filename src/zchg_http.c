@@ -7,12 +7,13 @@
  * - Native HTTP/1.1 server in pure C
  * - Non-blocking sockets + select()-based event loop
  * - Keep-alive and basic request pipelining
- * - Strand-aware routing for /serve/* paths
+ * - Strand-aware routing for /serve/ paths
  * - Direct ZCHG endpoints: /health, /metrics, /node_info, /strand_map
  * - Binary ZCHG frame handlers for gossip and fetch operations
  */
 
 #include "zchg_transport.h"
+#include "zchg_lattice.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -94,7 +95,7 @@ static int zchg_http_set_nonblocking(int fd) {
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
-static uint16_t zchg_http_port_from_env(void) {
+static uint16_t __attribute__((unused)) zchg_http_port_from_env(void) {
     const char *port_text = getenv("LN_HTTP_PORT");
     if (!port_text || *port_text == '\0') {
         return 8080;
@@ -165,7 +166,7 @@ static zchg_http_connection_t *zchg_http_acquire_connection(struct zchg_event_lo
     return conn;
 }
 
-static int zchg_http_socket_write(int fd, const char *buf, size_t len) {
+static int __attribute__((unused)) zchg_http_socket_write(int fd, const char *buf, size_t len) {
     size_t written = 0;
     while (written < len) {
         ssize_t rc = send(fd, buf + written, len - written, 0);
@@ -211,16 +212,6 @@ static const char *zchg_http_content_type_from_path(const char *path) {
     if (strstr(path, ".png") != NULL) return "image/png";
     if (strstr(path, ".jpg") != NULL || strstr(path, ".jpeg") != NULL) return "image/jpeg";
     return "application/octet-stream";
-}
-
-static char *zchg_http_strdup(const char *text) {
-    size_t len = strlen(text);
-    char *copy = (char *)malloc(len + 1);
-    if (!copy) {
-        return NULL;
-    }
-    memcpy(copy, text, len + 1);
-    return copy;
 }
 
 static int zchg_http_build_response(zchg_http_connection_t *conn,
@@ -315,6 +306,25 @@ static size_t zchg_http_header_value_length(const char *value) {
     return (size_t)(end - value);
 }
 
+static void zchg_http_copy_trunc(char *dst, size_t dst_cap, const char *src) {
+    if (!dst || dst_cap == 0) {
+        return;
+    }
+
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+
+    size_t n = strlen(src);
+    if (n >= dst_cap) {
+        n = dst_cap - 1;
+    }
+
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
 static int zchg_http_parse_request(zchg_http_connection_t *conn, size_t *out_consumed) {
     char *header_end = NULL;
     if (conn->read_len < 4) {
@@ -357,17 +367,17 @@ static int zchg_http_parse_request(zchg_http_connection_t *conn, size_t *out_con
         return -1;
     }
 
-    strncpy(conn->version, version, sizeof(conn->version) - 1);
+    zchg_http_copy_trunc(conn->version, sizeof(conn->version), version);
 
     if (strncmp(target, "zchg://", 7) == 0 || strncmp(target, "zchg://", 7) == 0) {
         const char *path_start = strchr(target + 7, '/');
         if (path_start) {
-            strncpy(conn->path, path_start, sizeof(conn->path) - 1);
+            zchg_http_copy_trunc(conn->path, sizeof(conn->path), path_start);
         } else {
-            strncpy(conn->path, "/", sizeof(conn->path) - 1);
+            zchg_http_copy_trunc(conn->path, sizeof(conn->path), "/");
         }
     } else {
-        strncpy(conn->path, target, sizeof(conn->path) - 1);
+        zchg_http_copy_trunc(conn->path, sizeof(conn->path), target);
     }
 
     const char *header_lines = line_end + 2;
@@ -550,6 +560,7 @@ static int zchg_http_response_strand_map(zchg_transport_server_t *server, zchg_h
 }
 
 static int zchg_http_response_protocol(zchg_transport_server_t *server, zchg_http_connection_t *conn) {
+    (void)server;
     char body[4096];
     size_t body_len = 0;
     body[0] = '\0';
@@ -612,6 +623,7 @@ static int zchg_http_read_file(const char *path, char **out_buf, size_t *out_len
 }
 
 static int zchg_http_response_serve(zchg_transport_server_t *server, zchg_http_connection_t *conn) {
+    (void)server;
     const char *relative = conn->path + strlen("/serve/");
     if (*relative == '\0') {
         return zchg_http_build_response(conn, 404, "text/plain; charset=utf-8", "not found\n", 10, conn->keep_alive);
@@ -676,7 +688,8 @@ static int zchg_http_response_gossip(zchg_transport_server_t *server, zchg_http_
     return zchg_http_build_response(conn, 204, "text/plain; charset=utf-8", "", 0, conn->keep_alive);
 }
 
-static int zchg_http_response_health_frame(zchg_transport_server_t *server, zchg_http_connection_t *conn) {
+static int __attribute__((unused)) zchg_http_response_health_frame(zchg_transport_server_t *server, zchg_http_connection_t *conn) {
+    (void)conn;
     zchg_frame_t frame;
     memset(&frame, 0, sizeof(frame));
     return zchg_handle_health_frame(server, &frame, NULL);
@@ -1117,7 +1130,7 @@ int zchg_event_loop_run(zchg_event_loop_t *loop) {
             zchg_gossip_evict_dead_peers(&loop->server->lattice);
             last_gossip_cycle = now;
         }
-        
+
         if (now - last_fileswap_evict >= 60) {
             zchg_fileswap_evict_lru(loop->server, 0);
             last_fileswap_evict = now;

@@ -11,6 +11,7 @@
 #include "zchg_core.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <arpa/inet.h>
 
 /* ============================================================================
@@ -108,6 +109,11 @@ void zchg_frame_free(zchg_frame_pool_t *pool, zchg_frame_t *frame) {
  * HMAC Signing & Verification (SHA256)
  * ============================================================================ */
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
 
@@ -159,6 +165,10 @@ int zchg_hmac_verify_frame(zchg_frame_t *frame, const char *secret, size_t secre
     /* Compare */
     return (memcmp(expected_hmac, test_frame.header.hmac, 20) == 0) ? 0 : -1;
 }
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 /* ============================================================================
  * Timestamp Validation (Replay Protection)

@@ -63,7 +63,7 @@ static zchg_connection_pool_t *zchg_transport_get_or_create_pool(zchg_transport_
     return pool;
 }
 
-static int zchg_transport_socket_nonblocking(int fd) {
+static int __attribute__((unused)) zchg_transport_socket_nonblocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0) {
         return -1;
@@ -109,7 +109,7 @@ static ssize_t zchg_transport_write_all(int fd, const uint8_t *buf, size_t len) 
     return (ssize_t)written;
 }
 
-static ssize_t zchg_transport_read_all(int fd, uint8_t *buf, size_t len) {
+static ssize_t __attribute__((unused)) zchg_transport_read_all(int fd, uint8_t *buf, size_t len) {
     size_t read_total = 0;
     while (read_total < len) {
         ssize_t rc = recv(fd, buf + read_total, len - read_total, 0);
@@ -399,8 +399,3 @@ int zchg_client_send_batch(zchg_transport_server_t *server,
     return 0;
 }
 
-int zchg_timestamp_is_valid(uint64_t timestamp) {
-    uint64_t now_ms = (uint64_t)time(NULL) * 1000ULL;
-    uint64_t diff = (now_ms > timestamp) ? (now_ms - timestamp) : (timestamp - now_ms);
-    return (diff <= (uint64_t)zchg_REPLAY_WINDOW_SEC * 1000ULL) ? 1 : 0;
-}

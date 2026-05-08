@@ -1,6 +1,6 @@
 /*
  * zchg_fileswap.c — Strand-addressed distributed filesystem
- * 
+ *
  * Implements ZCHG fileswap distribution:
  * - Strand-based routing (file hash → strand authority)
  * - Distributed caching with LRU eviction
@@ -27,7 +27,7 @@
 static uint8_t zchg_fileswap_hash_to_strand(const char *path) {
     uint32_t hash = 0;
     const unsigned char *p = (const unsigned char *)path;
-    
+
     /* Simple FNV-1a hash */
     while (*p) {
         hash ^= *p;
@@ -54,8 +54,9 @@ static void zchg_fileswap_local_path(const char *logical_path,
  * Returns 1 if space allocated, 0 if eviction needed, -1 on error.
  */
 static int zchg_fileswap_ensure_space(size_t needed_bytes) {
+    (void)needed_bytes;
     struct stat st;
-    
+
     /* Check if fileswap root exists */
     if (stat(zchg_FILESWAP_ROOT, &st) != 0) {
         return -1;
@@ -80,13 +81,13 @@ int zchg_fileswap_store(zchg_transport_server_t *server,
 
     uint8_t target_strand = zchg_fileswap_hash_to_strand(logical_path);
     uint32_t authority = zchg_lattice_get_strand_authority(&server->lattice, target_strand);
-    
+
     char local_path[2048];
     zchg_fileswap_local_path(logical_path, local_path, sizeof(local_path));
-    
+
     /* Check if we have local authority or are a mirror */
     int is_authority = (authority == server->local_ip);
-    
+
     if (!is_authority) {
         /* Not authority; check if we should become a passive mirror */
         /* For now, only store if we're the authority */
@@ -142,7 +143,7 @@ int zchg_fileswap_fetch(zchg_transport_server_t *server,
 
     char local_path[2048];
     zchg_fileswap_local_path(logical_path, local_path, sizeof(local_path));
-    
+
     struct stat st;
     if (stat(local_path, &st) == 0 && S_ISREG(st.st_mode)) {
         /* File exists locally; read it */
@@ -185,13 +186,14 @@ int zchg_fileswap_fetch(zchg_transport_server_t *server,
 int zchg_fileswap_migrate_on_authority_shift(zchg_transport_server_t *server,
                                               uint8_t strand,
                                               uint32_t new_authority) {
+    (void)strand;
     if (!server || new_authority == 0) {
         return -1;
     }
 
     /* Placeholder: scan fileswap for files assigned to this strand */
     /* and migrate them to new authority via zchg_client_send_frame */
-    
+
     return 0;
 }
 
@@ -201,12 +203,13 @@ int zchg_fileswap_migrate_on_authority_shift(zchg_transport_server_t *server,
  */
 int zchg_fileswap_evict_lru(zchg_transport_server_t *server,
                              size_t target_free_bytes) {
+    (void)target_free_bytes;
     if (!server) {
         return -1;
     }
 
     /* Placeholder: scan cache, sort by access time, delete oldest until space freed */
-    
+
     return 0;
 }
 
@@ -217,6 +220,7 @@ int zchg_fileswap_evict_lru(zchg_transport_server_t *server,
 int zchg_fileswap_capture_as_mirror(zchg_transport_server_t *server,
                                      uint8_t strand,
                                      uint32_t authority) {
+    (void)strand;
     if (!server || authority == 0) {
         return 0;  /* No-op if no authority */
     }
@@ -226,7 +230,7 @@ int zchg_fileswap_capture_as_mirror(zchg_transport_server_t *server,
     }
 
     /* Placeholder: fetch recent files from authority strand and cache locally */
-    
+
     return 0;
 }
 
@@ -244,6 +248,6 @@ int zchg_fileswap_stats(const char *fileswap_root,
     *out_file_count = 0;
 
     /* Placeholder: walk directory tree and aggregate stats */
-    
+
     return 0;
 }

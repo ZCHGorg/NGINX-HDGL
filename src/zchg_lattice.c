@@ -28,7 +28,7 @@ double zchg_ema_update(double current_ema, double new_value) {
     if (current_ema < 0.001) {
         return new_value;  /* First measurement */
     }
-    return zchg_EMA_ALPHA * new_value + (1.0 - zchg_EMA_ALPHA) * current_ema;
+    return ZCHG_EMA_ALPHA * new_value + (1.0 - ZCHG_EMA_ALPHA) * current_ema;
 }
 
 /* ============================================================================
@@ -226,6 +226,7 @@ void zchg_provisioner_scale(zchg_lattice_t *lattice) {
 }
 
 void zchg_provisioner_phaseshift(zchg_lattice_t *lattice, uint64_t cycle) {
+    (void)lattice;
     /* Rotate strand authority based on cycle (round-robin effect) */
     uint8_t shift = (cycle % zchg_STRAND_COUNT);
     /* Shift can be applied here if needed for dynamic rebalancing */
@@ -241,6 +242,7 @@ void zchg_provisioner_omegamult(zchg_lattice_t *lattice) {
 }
 
 void zchg_provisioner_energy(zchg_lattice_t *lattice) {
+    (void)lattice;
     /* Energy is already computed as authority_weight */
 }
 
@@ -282,6 +284,7 @@ int zchg_lattice_compute_my_strands(zchg_lattice_t *lattice, uint8_t *out_strand
  * ============================================================================ */
 
 uint32_t zchg_compute_omega_ttl(uint8_t strand_id, uint64_t cycle) {
+    (void)cycle;
     /* TTL_k = TTL_BASE * exp(-alpha_k * SPIRAL_PERIOD)
      * Contracting strands (alpha < 0) cache longer
      * Expanding strands (alpha > 0) refresh faster */

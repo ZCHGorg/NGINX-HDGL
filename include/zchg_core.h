@@ -27,6 +27,11 @@
 #define zchg_FRAME_HEADER_SIZE      52      /* Fixed header size in bytes */
 #define zchg_FRAME_MAX_PAYLOAD      (1024 * 1024)  /* 1MB max payload */
 
+/* Compatibility aliases for mixed macro casing in v0.6-c sources */
+#define ZCHG_FRAME_VERSION          zchg_FRAME_VERSION
+#define ZCHG_FRAME_HEADER_SIZE      zchg_FRAME_HEADER_SIZE
+#define ZCHG_FRAME_MAX_PAYLOAD      zchg_FRAME_MAX_PAYLOAD
+
 /* Frame types */
 typedef enum {
     zchg_FRAME_INFO       = 0x01,
@@ -74,7 +79,7 @@ typedef struct {
 #define zchg_STRAND_H               7
 
 /* Strand names (Point, Line, Triangle, Tetrahedron, Pentachoron, etc.) */
-static const char *zchg_STRAND_NAMES[] = {
+static const char *zchg_STRAND_NAMES[] __attribute__((unused)) = {
     "Point", "Line", "Triangle", "Tetrahedron",
     "Pentachoron", "Hexacross", "Heptacube", "Octacube"
 };
@@ -82,6 +87,10 @@ static const char *zchg_STRAND_NAMES[] = {
 /* Phi-spiral parameters */
 #define zchg_PHI                    1.618033988749894848204586834365638
 #define zchg_SPIRAL_PERIOD          8       /* One rotation = 8 strands */
+
+#define ZCHG_STRAND_COUNT           zchg_STRAND_COUNT
+#define ZCHG_PHI                    zchg_PHI
+#define ZCHG_SPIRAL_PERIOD          zchg_SPIRAL_PERIOD
 
 /* Strand weight (EMA-based) */
 typedef struct {
@@ -120,6 +129,9 @@ typedef struct {
 #define zchg_CLUSTER_FINGERPRINT_SIZE   4   /* 32-bit fingerprint */
 #define zchg_MAX_PEERS                  256
 
+#define ZCHG_CLUSTER_FINGERPRINT_SIZE   zchg_CLUSTER_FINGERPRINT_SIZE
+#define ZCHG_MAX_PEERS                  zchg_MAX_PEERS
+
 /* Per-peer state */
 typedef struct {
     uint32_t    ip_addr;            /* Peer IP (network byte order) */
@@ -151,6 +163,10 @@ typedef struct {
 #define zchg_MAX_POOL_SIZE          32
 #define zchg_KEEP_ALIVE_TTL         60.0    /* Seconds */
 #define zchg_POOL_REUSE_LIMIT       64      /* Requests per connection */
+
+#define ZCHG_MAX_POOL_SIZE          zchg_MAX_POOL_SIZE
+#define ZCHG_KEEP_ALIVE_TTL         zchg_KEEP_ALIVE_TTL
+#define ZCHG_POOL_REUSE_LIMIT       zchg_POOL_REUSE_LIMIT
 
 /* Pooled connection state */
 typedef struct {
@@ -231,6 +247,9 @@ typedef struct {
 #define zchg_GOSSIP_PORT            8090
 #define zchg_GOSSIP_INTERVAL        30      /* Seconds between gossip cycles */
 
+#define ZCHG_GOSSIP_PORT            zchg_GOSSIP_PORT
+#define ZCHG_GOSSIP_INTERVAL        zchg_GOSSIP_INTERVAL
+
 /* Gossip message (packed binary, ~16 bytes) */
 typedef struct {
     uint32_t    source_ip;
@@ -245,6 +264,13 @@ typedef struct {
 
 #define zchg_FILESWAP_ROOT          "/opt/zchg_swap"
 #define zchg_FILESWAP_MAX_SIZE_GB   7       /* Max fileswap size */
+
+#define ZCHG_FILESWAP_ROOT          zchg_FILESWAP_ROOT
+#define ZCHG_FILESWAP_MAX_SIZE_GB   zchg_FILESWAP_MAX_SIZE_GB
+
+/* Replay window is shared by frame/transport paths. */
+#define zchg_REPLAY_WINDOW_SEC      30
+#define ZCHG_REPLAY_WINDOW_SEC      zchg_REPLAY_WINDOW_SEC
 
 /* File route (path → strand → authority node) */
 typedef struct {
@@ -296,7 +322,7 @@ void zchg_pool_invalidate_connection(zchg_connection_pool_t *pool, int fd);
 
 /* Lattice / cluster state */
 void zchg_lattice_update_strand_weight(zchg_lattice_t *lattice, uint8_t strand_id, double latency_ms);
-void zchg_lattice_compute_fingerprint(zchg_lattice_t *lattice);
+uint32_t zchg_lattice_compute_fingerprint(zchg_lattice_t *lattice);
 uint32_t zchg_lattice_get_authority(zchg_lattice_t *lattice, uint8_t strand_id);
 
 /* HMAC / security */
