@@ -48,6 +48,7 @@ class SessionState:
     taken_items: Dict[str, bool] = field(default_factory=dict)
     room_owner: Dict[str, str] = field(default_factory=dict)
     migrations: List[Dict[str, object]] = field(default_factory=list)
+    chat_log: List[Dict[str, object]] = field(default_factory=list)
 
 
 def room_name(x: int, y: int) -> str:
@@ -195,6 +196,7 @@ def player_snapshot(session: SessionState, player: PlayerState) -> Dict[str, obj
         "active_hosts": host_names,
         "assigned_host": assigned_host,
         "recent_migrations": session.migrations[-5:],
+        "recent_chat": session.chat_log[-10:],
     }
 
 
@@ -211,6 +213,23 @@ def topology_snapshot(session: SessionState) -> Dict[str, object]:
 def process_command(session: SessionState, player: PlayerState, cmd: str) -> Dict[str, object]:
     c = cmd.strip().lower()
     msg = ""
+
+    if c.startswith("say "):
+        text = cmd.strip()[4:].strip()
+        if not text:
+            msg = "Say what?"
+        else:
+            entry = {
+                "from": player.username,
+                "text": text[:240],
+                "ts": int(time.time()),
+            }
+            session.chat_log.append(entry)
+            if len(session.chat_log) > 200:
+                session.chat_log = session.chat_log[-200:]
+            msg = f"You say: {entry['text']}"
+        player.last_seen = time.time()
+        return {"message": msg, "state": player_snapshot(session, player)}
 
     if c in ("n", "north"):
         if player.y == 0:
@@ -262,9 +281,21 @@ def process_command(session: SessionState, player: PlayerState, cmd: str) -> Dic
     elif c == "map":
         msg = "Map requested."
     elif c == "help":
-        msg = "Commands: n s e w, look, map, get, inv, talk, help"
+        msg = "Commands: n s e w, look, map, get, inv, talk, say <msg>, help"
     else:
-        msg = f"Unknown command: {cmd}"
+        # QoL: treat freeform phrases as chat so users can type naturally.
+        if " " in cmd.strip():
+            entry = {
+                "from": player.username,
+                "text": cmd.strip()[:240],
+                "ts": int(time.time()),
+            }
+            session.chat_log.append(entry)
+            if len(session.chat_log) > 200:
+                session.chat_log = session.chat_log[-200:]
+            msg = f"You say: {entry['text']}"
+        else:
+            msg = f"Unknown command: {cmd}"
 
     player.last_seen = time.time()
     return {"message": msg, "state": player_snapshot(session, player)}
@@ -370,6 +401,12 @@ function renderState(state) {
   add(`Session: ${state.session_uri}`, 'muted');
   add(`Hosts online: ${state.active_hosts.join(', ') || 'none'}`, 'ok');
   if (state.assigned_host) add(`Assigned host for this room: ${state.assigned_host}`, 'ok');
+    if (state.recent_chat && state.recent_chat.length) {
+        add('--- Session Chat ---', 'muted');
+        for (const m of state.recent_chat.slice(-3)) {
+            add(`[${m.from}] ${m.text}`);
+        }
+    }
 }
 
 async function zfetch(path, opts = {}) {
