@@ -211,11 +211,14 @@ def topology_snapshot(session: SessionState) -> Dict[str, object]:
 
 
 def process_command(session: SessionState, player: PlayerState, cmd: str) -> Dict[str, object]:
-    c = cmd.strip().lower()
+    raw = cmd.strip()
+    c = raw.lower()
+    # Tolerate punctuation and spacing for directional commands.
+    c_norm = " ".join(c.replace(",", " ").replace(";", " ").split())
     msg = ""
 
     if c.startswith("say "):
-        text = cmd.strip()[4:].strip()
+        text = raw[4:].strip()
         if not text:
             msg = "Say what?"
         else:
@@ -231,33 +234,38 @@ def process_command(session: SessionState, player: PlayerState, cmd: str) -> Dic
         player.last_seen = time.time()
         return {"message": msg, "state": player_snapshot(session, player)}
 
-    if c in ("n", "north"):
+    move_north = c_norm in ("n", "north", "up", "u")
+    move_south = c_norm in ("s", "south", "down", "d")
+    move_east = c_norm in ("e", "east", "right", "r")
+    move_west = c_norm in ("w", "west", "left", "l")
+
+    if move_north:
         if player.y == 0:
             msg = "A canyon wall blocks your way north."
         else:
             player.y -= 1
             msg = "You move north."
-    elif c in ("s", "south"):
+    elif move_south:
         if player.y == MAP_H - 1:
             msg = "The southern boundary is impassable scrub."
         else:
             player.y += 1
             msg = "You move south."
-    elif c in ("e", "east"):
+    elif move_east:
         if player.x == MAP_W - 1:
             msg = "You reach the eastern perimeter fence."
         else:
             player.x += 1
             msg = "You move east."
-    elif c in ("w", "west"):
+    elif move_west:
         if player.x == 0:
             msg = "A steep drop prevents heading further west."
         else:
             player.x -= 1
             msg = "You move west."
-    elif c == "look":
+    elif c_norm == "look":
         msg = "You look around."
-    elif c in ("get", "take"):
+    elif c_norm in ("get", "take"):
         room = room_data(player.x, player.y)
         k = room_key(player.x, player.y)
         if not room.item:
@@ -270,18 +278,18 @@ def process_command(session: SessionState, player: PlayerState, cmd: str) -> Dic
             player.inventory.append(room.item)
             session.taken_items[k] = True
             msg = f"You pick up: {room.item}"
-    elif c in ("inv", "inventory"):
+    elif c_norm in ("inv", "inventory"):
         msg = "Inventory: " + (", ".join(player.inventory) if player.inventory else "empty")
-    elif c == "talk":
+    elif c_norm == "talk":
         room = room_data(player.x, player.y)
         if room.npc:
             msg = f"{room.npc} says: \"{room.npc_line}\""
         else:
             msg = "No one is here to talk to."
-    elif c == "map":
+    elif c_norm == "map":
         msg = "Map requested."
-    elif c == "help":
-        msg = "Commands: n s e w, look, map, get, inv, talk, say <msg>, help"
+    elif c_norm == "help":
+        msg = "Commands: n s e w (or up/down/left/right), look, map, get, inv, talk, say <msg>, help"
     else:
         # QoL: treat freeform phrases as chat so users can type naturally.
         if " " in cmd.strip():
