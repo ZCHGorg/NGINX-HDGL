@@ -333,7 +333,7 @@ INDEX_HTML = """<!doctype html>
       padding: 14px;
       box-shadow: 0 10px 35px rgba(0,0,0,.35);
     }
-    .cfg { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 12px; }
+    .cfg { display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 8px; margin-bottom: 12px; }
     .terminal { min-height: 340px; max-height: 480px; overflow-y: auto; }
     .line { margin: 0 0 6px; white-space: pre-wrap; }
     .muted { color: var(--muted); }
@@ -351,6 +351,16 @@ INDEX_HTML = """<!doctype html>
     }
     input { width: 100%; }
     button { cursor: pointer; }
+        .ghost {
+            display: inline-block;
+            text-decoration: none;
+            text-align: center;
+            color: var(--ink);
+            background: #111a23;
+            border: 1px solid #2a3a4b;
+            border-radius: 8px;
+            padding: 10px;
+        }
   </style>
 </head>
 <body>
@@ -360,6 +370,7 @@ INDEX_HTML = """<!doctype html>
       <input id=\"user\" placeholder=\"username\" value=\"rider\" />
       <input id=\"uri\" placeholder=\"zchg://frontierland/session/main\" value=\"zchg://frontierland/session/main\" />
       <button id=\"connect\">Connect</button>
+            <a class="ghost" href="/unlock">Unlock zchg://</a>
     </div>
     <div class=\"terminal\" id=\"term\"></div>
     <div class=\"cmdrow\">
@@ -482,7 +493,129 @@ async function run() {
 connect.addEventListener('click', doConnect);
 send.addEventListener('click', run);
 cmd.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+
+// Allow local zchg handler handoff: /?zchg_uri=zchg%3A%2F%2F...
+const params = new URLSearchParams(window.location.search);
+const inbound = params.get('zchg_uri');
+if (inbound && inbound.toLowerCase().startsWith('zchg://')) {
+    uri.value = inbound;
+    add(`Inbound zchg URI received: ${inbound}`, 'ok');
+}
 </script>
+</body>
+</html>
+"""
+
+
+UNLOCK_HTML = """<!doctype html>
+<html lang=\"en\">
+<head>
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <title>Unlock zchg:// Protocol</title>
+    <style>
+        :root {
+            --bg: #101724;
+            --panel: #182437;
+            --ink: #e7eef7;
+            --accent: #f2b26a;
+            --muted: #9cb1c9;
+            --ok: #67d67d;
+            --warn: #ffd166;
+        }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: Consolas, \"Courier New\", monospace;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at 10% 10%, rgba(80,130,190,.25), transparent 45%),
+                radial-gradient(circle at 90% 85%, rgba(242,178,106,.2), transparent 40%),
+                var(--bg);
+            display: grid;
+            place-items: center;
+            padding: 20px;
+        }
+        .panel {
+            width: min(760px, 95vw);
+            background: var(--panel);
+            border: 1px solid #2d415b;
+            border-radius: 12px;
+            padding: 18px;
+            box-shadow: 0 14px 32px rgba(0,0,0,.35);
+        }
+        h1 { margin: 0 0 10px; color: var(--accent); font-size: 24px; }
+        p { margin: 8px 0; color: var(--muted); line-height: 1.4; }
+        .strong { color: var(--ink); }
+        .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+        button, a {
+            font: inherit;
+            color: var(--ink);
+            background: #111c2b;
+            border: 1px solid #355073;
+            border-radius: 8px;
+            padding: 10px 12px;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .status { margin-top: 12px; padding: 10px; border-radius: 8px; border: 1px solid #2d415b; }
+        .ok { color: var(--ok); }
+        .warn { color: var(--warn); }
+        code {
+            color: var(--ink);
+            background: #122032;
+            border: 1px solid #2a3f5a;
+            border-radius: 6px;
+            padding: 2px 5px;
+        }
+        ul { margin: 10px 0 0 18px; color: var(--muted); }
+    </style>
+</head>
+<body>
+    <div class=\"panel\">
+        <h1>zchg:// Protocol Unlock</h1>
+        <p class=\"strong\">This page can trigger zchg:// from a trusted user click.</p>
+        <p>Browsers do not allow websites to silently install protocol handlers for arbitrary schemes. A local zchg handler must already be installed on this machine.</p>
+        <p>Target URI: <code id=\"target\">zchg://frontierland/session/main</code></p>
+
+        <div class=\"row\">
+            <button id=\"unlock\">Unlock zchg:// now</button>
+            <a href=\"/\">Open Frontierland Terminal</a>
+        </div>
+
+        <div class=\"status\" id=\"status\">Waiting for user action.</div>
+
+        <ul>
+            <li>If your browser prompts to open zchg://, allow it and optionally set always allow.</li>
+            <li>If nothing happens, install/register your zchg protocol handler first, then retry.</li>
+            <li>After successful launch, return to the terminal page and connect.</li>
+        </ul>
+    </div>
+
+    <script>
+        const unlockBtn = document.getElementById('unlock');
+        const statusEl = document.getElementById('status');
+        const target = 'zchg://frontierland/session/main';
+
+        function setStatus(text, cls = '') {
+            statusEl.className = 'status ' + cls;
+            statusEl.textContent = text;
+        }
+
+        unlockBtn.addEventListener('click', () => {
+            setStatus('Attempting to open zchg:// via user gesture...', 'warn');
+
+            // Custom protocol launches are browser/OS mediated and require user action.
+            window.location.href = target;
+
+            setTimeout(() => {
+                setStatus(
+                    'If a prompt appeared, approve opening zchg://. If no prompt appeared, install or register a local zchg protocol handler and try again.',
+                    'ok'
+                );
+            }, 900);
+        });
+    </script>
 </body>
 </html>
 """
@@ -523,6 +656,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+
+        if parsed.path == "/unlock":
+            html = UNLOCK_HTML.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+            return
 
         if parsed.path == "/":
             html = INDEX_HTML.encode("utf-8")

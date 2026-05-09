@@ -31,6 +31,29 @@ Open:
 http://127.0.0.1:8091/
 ```
 
+### 3) Install Local zchg Protocol Handler (One-Click)
+
+Run once on each machine:
+
+```bash
+python3 frontierland/install_zchg_handler.py
+```
+
+Then visit:
+
+```text
+http://127.0.0.1:8091/unlock
+```
+
+Click `Unlock zchg:// now` to trigger protocol launch from a user gesture.
+
+Notes:
+
+- Windows installs handler in HKCU (no admin).
+- Linux installs user-local desktop handler (`~/.local/share/applications`).
+- macOS creates `~/Applications/ZCHG Handler.app` and refreshes LaunchServices.
+- Use `--dry-run` to preview actions.
+
 ## What Makes Frontierland Different
 
 ### zchg Protocol Gating
@@ -135,6 +158,8 @@ Query:
 
 - frontierland/mud_terminal.c: terminal gameplay engine
 - frontierland/browser_gateway.py: browser gateway, protocol gate, session and topology logic
+- frontierland/install_zchg_handler.py: cross-platform zchg protocol installer
+- frontierland/zchg_handler.py: local handler entrypoint for zchg:// URLs
 - frontierland/README.md: branch-specific project guide
 
 ## Branch Contract
