@@ -7,6 +7,54 @@ Use this for a clean redeploy on each node.
 
 ---
 
+## Reverse proxy trust (generalized, public-safe)
+
+Use this when your HDGL ingress sits behind any trusted edge proxy/CDN/LB.
+This preserves real client identity across proxy hops and prevents shared-source
+rate behavior from collapsing traffic into one apparent IP.
+
+1. In `/opt/hdgl/.env` on each node, set:
+
+```bash
+LN_REAL_IP_TRUST_ENABLED=1
+LN_REAL_IP_HEADER=X-Forwarded-For
+LN_REAL_IP_RECURSIVE=1
+LN_TRUSTED_PROXY_CIDRS="127.0.0.1"
+# Optional external list file
+# LN_TRUSTED_PROXY_CIDRS_FILE=/etc/nginx/conf.d/trusted_proxy_cidrs.list
+```
+
+2. Add only trusted proxy CIDRs/IPs (never broad Internet ranges unless they are
+  authoritative ranges for your chosen edge provider).
+
+3. Restart daemon to regenerate ingress config, then validate nginx:
+
+```bash
+sudo systemctl restart hdgl-daemon
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+4. Verify at runtime:
+
+```bash
+sudo nginx -T | grep -nE 'set_real_ip_from|real_ip_header|real_ip_recursive'
+```
+
+5. Regression checks for proxy on/off transitions:
+
+```bash
+# edge path (normal user path)
+for i in $(seq 1 40); do curl -s -o /dev/null -w '%{http_code}\n' https://zchg.org/; done | sort | uniq -c
+
+# direct origin controls (replace ORIGIN_IP)
+for i in $(seq 1 40); do curl -s -o /dev/null -k --resolve zchg.org:443:ORIGIN_IP -w '%{http_code}\n' https://zchg.org/; done | sort | uniq -c
+```
+
+Expected healthy state: sustained 200 responses on both edge and origin controls,
+without persistent 429 spikes after enabling trusted-proxy configuration.
+
+---
+
 ## 1. Full reset on a node
 
 ```bash

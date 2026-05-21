@@ -337,6 +337,19 @@ LN_FILESWAP_HTTP_PORT=8090
 LN_FILESWAP_TTL_BASE=3600
 LN_FILESWAP_MAX_SIZE=$HDGL_FILESWAP_MAX_SIZE
 
+# ── REVERSE PROXY TRUST (optional, generalized) ─────────────────────────────
+# Enable when traffic may arrive through trusted edge proxies/load balancers.
+# Keep disabled for direct-only ingress.
+LN_REAL_IP_TRUST_ENABLED=0
+# Typical values: X-Forwarded-For, CF-Connecting-IP, X-Real-IP
+LN_REAL_IP_HEADER=X-Forwarded-For
+LN_REAL_IP_RECURSIVE=1
+# Space/comma/semicolon-separated CIDRs or IPs of trusted proxies.
+# Example: "127.0.0.1 10.0.0.0/8"
+LN_TRUSTED_PROXY_CIDRS=
+# Optional path to file with one CIDR/IP per line (comments allowed).
+LN_TRUSTED_PROXY_CIDRS_FILE=
+
 # ── SECURITY ──────────────────────────────────────────────────────────────────
 # Generate with: openssl rand -hex 32
 # Must be identical on every node in the cluster.
