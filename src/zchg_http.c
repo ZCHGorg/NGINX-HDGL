@@ -191,6 +191,8 @@ static const char *zchg_http_status_text(int status_code) {
     switch (status_code) {
         case 200: return "OK";
         case 204: return "No Content";
+        case 401: return "Unauthorized";
+        case 403: return "Forbidden";
         case 400: return "Bad Request";
         case 404: return "Not Found";
         case 405: return "Method Not Allowed";
@@ -456,6 +458,27 @@ static void zchg_http_ip_to_text(uint32_t ip_addr, char *out, size_t out_len) {
     snprintf(out, out_len, "%s", text);
 }
 
+static int zchg_http_peer_ip_from_fd(int fd, uint32_t *out_ip) {
+    if (fd < 0 || !out_ip) {
+        return -1;
+    }
+
+    struct sockaddr_in peer_addr;
+    socklen_t peer_len = sizeof(peer_addr);
+    memset(&peer_addr, 0, sizeof(peer_addr));
+
+    if (getpeername(fd, (struct sockaddr *)&peer_addr, &peer_len) != 0) {
+        return -1;
+    }
+
+    if (peer_addr.sin_family != AF_INET) {
+        return -1;
+    }
+
+    *out_ip = peer_addr.sin_addr.s_addr;
+    return 0;
+}
+
 static uint64_t zchg_http_uptime_seconds(const zchg_transport_server_t *server) {
     if (!server->started_at) {
         return 0;
@@ -665,6 +688,30 @@ static int zchg_http_response_frame_upload(zchg_transport_server_t *server, zchg
         return zchg_http_build_response(conn, 400, "text/plain; charset=utf-8", "invalid frame\n", 15, conn->keep_alive);
     }
 
+    if (zchg_hmac_verify_frame(&frame, server->cluster_secret, server->secret_len) != 0) {
+        if (frame.payload) {
+            free(frame.payload);
+        }
+        return zchg_http_build_response(conn, 401, "text/plain; charset=utf-8", "invalid frame signature\n", 24, conn->keep_alive);
+    }
+
+    if (!zchg_timestamp_is_valid(frame.header.timestamp)) {
+        if (frame.payload) {
+            free(frame.payload);
+        }
+        return zchg_http_build_response(conn, 401, "text/plain; charset=utf-8", "stale frame timestamp\n", 22, conn->keep_alive);
+    }
+
+    uint32_t peer_ip = 0;
+    if (zchg_http_peer_ip_from_fd(conn->fd, &peer_ip) == 0 &&
+        frame.header.source_ip != 0 &&
+        frame.header.source_ip != peer_ip) {
+        if (frame.payload) {
+            free(frame.payload);
+        }
+        return zchg_http_build_response(conn, 403, "text/plain; charset=utf-8", "source ip mismatch\n", 19, conn->keep_alive);
+    }
+
     zchg_server_handle_frame(server, conn->fd, &frame);
 
     if (frame.payload) {
@@ -683,6 +730,14 @@ static int zchg_http_response_gossip(zchg_transport_server_t *server, zchg_http_
     zchg_gossip_msg_t msg;
     memset(&msg, 0, sizeof(msg));
     memcpy(&msg, conn->read_buf + conn->body_offset, sizeof(msg));
+
+    uint32_t peer_ip = 0;
+    if (zchg_http_peer_ip_from_fd(conn->fd, &peer_ip) == 0 &&
+        msg.source_ip != 0 &&
+        msg.source_ip != peer_ip) {
+        return zchg_http_build_response(conn, 403, "text/plain; charset=utf-8", "gossip source mismatch\n", 23, conn->keep_alive);
+    }
+
     zchg_lattice_apply_gossip(&server->lattice, msg.source_ip, &msg);
 
     return zchg_http_build_response(conn, 204, "text/plain; charset=utf-8", "", 0, conn->keep_alive);
